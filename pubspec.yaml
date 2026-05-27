@@ -1,0 +1,27 @@
+name: wwjd_app
+description: WWJD - What Would Jesus Do? Catholic Moral Advisor
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  cloud_firestore: ^6.3.0
+  firebase_auth: ^6.4.0
+  firebase_core: ^4.7.0
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  intl: ^0.20.2
+  share_plus: ^10.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/wwjd_header.jpg

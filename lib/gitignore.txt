@@ -1,0 +1,24 @@
+# Flutter
+.dart_tool/
+.packages
+pubspec.lock
+*.iml
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Secrets
+lib/firebase_options.dart
+google-services.json
+GoogleService-Info.plist
+*.key
+xai-*
+
+# Cache / Build
+**/*.dill
+**/*.cache.*
+**/*.track.dill
+
+# Agents / Temp
+.agents/
+.grokbuild/

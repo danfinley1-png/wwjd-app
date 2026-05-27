@@ -1,0 +1,248 @@
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter/services.dart';
+
+void main() {
+  runApp(const WWJDApp());
+}
+
+class WWJDApp extends StatelessWidget {
+  const WWJDApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'WWJD – DI',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        primarySwatch: Colors.deepOrange,
+        scaffoldBackgroundColor: const Color(0xFFF8F5F0),
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final List<Map<String, String>> _messages = [];
+  final TextEditingController _controller = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  bool _isLoading = false;
+
+  // ████████████████████████████████████████████████████████████
+  String xaiApiKey = 'YOUR_XAI_API_KEY_HERE';   // ← Replace with real key later;
+  // ████████████████████████████████████████████████████████████
+
+  static const String _apiUrl = 'https://api.x.ai/v1/chat/completions';
+  static const String model = "grok-4-1-fast-reasoning";
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  void _copyToClipboard(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✓ Copied')));
+  }
+
+  Future<void> _sendMessage() async {
+    final question = _controller.text.trim();
+    if (question.isEmpty) return;
+
+    setState(() {
+      _messages.add({'role': 'user', 'content': question});
+      _isLoading = true;
+    });
+    _controller.clear();
+    _scrollToBottom();
+
+    try {
+      final response = await http.post(
+        Uri.parse(_apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $XAI_API_KEY',
+        },
+        body: jsonEncode({
+          "model": model,
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are WWJD – What Would Jesus Do?, a faithful Catholic AI companion.\n\n"
+                  "Every response must follow this exact warm and hopeful structure:\n"
+                  "1. Warm Welcome – Start with empathy. Remind the user they are safe bringing any question.\n"
+                  "2. The Two Great Commandments – Reference loving God fully and loving neighbor as self.\n"
+                  "3. What Would Jesus Do? – Short, Gospel-rooted guidance.\n"
+                  "4. Mercy & Forgiveness – Always include God's infinite mercy and the Sacrament of Reconciliation.\n"
+                  "5. Practical Next Steps – Concrete actions.\n"
+                  "6. Kingdom Challenge – Encourage using gifts to build the Kingdom.\n"
+                  "7. Deeper Catholic Roots – Offer Scripture, CCC, or saints when helpful.\n\n"
+                  "Tone: Warm, truthful, reverent, hopeful. Always emphasize mercy and forgiveness.\n"
+                  "End every response with: \"WWJD is a formation aid aligned with the Magisterium. It is not a substitute for the sacraments or a priest. For grave matters, consult your pastor.\""
+            },
+            ..._messages.map((m) => {"role": m['role']!, "content": m['content']!})
+          ],
+          "temperature": 0.7,
+          "max_tokens": 950,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final reply = data['choices'][0]['message']['content'].trim();
+        setState(() => _messages.add({'role': 'assistant', 'content': reply}));
+      } else {
+        setState(() => _messages.add({'role': 'assistant', 'content': 'API Error ${response.statusCode}'}));
+      }
+    } catch (e) {
+      setState(() => _messages.add({'role': 'assistant', 'content': 'Connection error. Please try again.'}));
+    } finally {
+      setState(() => _isLoading = false);
+      _scrollToBottom();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF8B1E1E),
+        toolbarHeight: 110,
+        title: Row(
+          children: [
+            const Icon(Icons.church, size: 52, color: Colors.white),
+            const SizedBox(width: 16),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('WWJD – DI', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white)),
+                Text('Sharing the Divine Intelligence of Scripture and the Revelation of the Catholic Church',
+                    style: TextStyle(fontSize: 14, color: Colors.white70)),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16, top: 8, bottom: 8),
+            child: Image.asset(
+              'assets/images/wwjd_header.jpg',
+              height: 80,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) => const Icon(Icons.church, size: 60, color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+      body: Row(
+        children: [
+          Container(
+            width: 280,
+            color: const Color(0xFFF0EDE6),
+            child: Column(
+              children: [
+                const Padding(padding: EdgeInsets.all(20), child: Text('Tools for the Journey', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
+                ListTile(leading: const Icon(Icons.lightbulb), title: const Text("Seeking God's Wisdom")),
+                ListTile(leading: const Icon(Icons.card_giftcard), title: const Text('Using My Gifts for the Kingdom')),
+                ListTile(leading: const Icon(Icons.access_time), title: const Text('My Moral Dilemmas')),
+                ListTile(leading: const Icon(Icons.history), title: const Text('My History')),
+                ListTile(leading: const Icon(Icons.people), title: const Text('Community Sharing')),
+
+                const Divider(),
+                const Padding(padding: EdgeInsets.all(20), child: Text('Spiritual Nourishment', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
+                ListTile(leading: const Icon(Icons.church), title: const Text('Attend Mass')),
+                ListTile(leading: const Icon(Icons.replay), title: const Text('Go to Confession')),
+                ListTile(leading: const Icon(Icons.favorite), title: const Text('Eucharistic Adoration')),
+                ListTile(leading: const Icon(Icons.assignment_turned_in), title: const Text('Examination of Conscience')),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Column(
+              children: [
+                Expanded(
+                  child: _messages.isEmpty
+                      ? const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.church, size: 120, color: Colors.grey),
+                              SizedBox(height: 24),
+                              Text('Peace be with you.', style: TextStyle(fontSize: 28)),
+                              Text('What is weighing on your heart today?', style: TextStyle(fontSize: 18)),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _messages.length,
+                          itemBuilder: (context, index) {
+                            final msg = _messages[index];
+                            final isUser = msg['role'] == 'user';
+                            return Align(
+                              alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 16),
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: isUser ? Colors.blue.shade50 : Colors.white,
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(msg['content']!, style: const TextStyle(fontSize: 16, height: 1.5)),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _controller,
+                          maxLines: 3,
+                          minLines: 1,
+                          decoration: InputDecoration(
+                            hintText: 'Continue the conversation or describe a new dilemma...',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(30)),
+                            filled: true,
+                            fillColor: Colors.white,
+                          ),
+                          onSubmitted: (_) => _sendMessage(),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        iconSize: 48,
+                        icon: _isLoading ? const CircularProgressIndicator() : const Icon(Icons.send, color: Color(0xFF8B1E1E)),
+                        onPressed: _isLoading ? null : _sendMessage,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
