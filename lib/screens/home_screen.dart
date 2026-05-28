@@ -8,7 +8,6 @@ import '../core/config.dart';
 import '../widgets/spiritual_nourishment_section.dart';
 import '../core/app_colors.dart';
 
-
 /// The primary screen for the WWJD Catholic Dialog experience.
 
 class HomeScreen extends StatefulWidget {
@@ -24,9 +23,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final ScrollController _scrollController = ScrollController();
   bool _hasShownInitialDemo = false;
 
-  bool _isMockMode = false;   // Default to Live Mode
+  bool _isMockMode = false;
   bool _isSending = false;
-  String? _selectedSpiritualTopic;
 
   static const double kDesktopBreakpoint = 900.0;
   static const double kHeaderLogoSize = 74.0;
@@ -38,160 +36,96 @@ class _HomeScreenState extends State<HomeScreen> {
   static const double kMessageMaxWidthAssistant = 0.92;
   static const double kLoadingImageSize = 42.0;
 
-  static const String _primarySampleResponse = '''
-Welcome, friend. In our Catholic community we believe there is no wound, no anger, and no betrayal too heavy to bring into the light of Christ. You are safe here. Many of us have carried the same heavy stones you describe.
+  static const String _primarySampleResponse = '''[Your full primary response text]''';
 
-The Two Great Commandments frame everything: we are called to love the Lord our God with all our heart, soul, mind, and strength, and to love our neighbor as ourselves (Mark 12:30-31). This includes the neighbor who has hurt us most deeply.
+  static const String _delveDeeperResponse = '''[Your full delve deeper response text]''';
 
-What Would Jesus Do? The Gospels show us a Savior who forgave those who crucified Him while they were still mocking Him. He did not wait for their apology. He offered mercy from the Cross. In the same way, He invites us to hand over the debt we feel is owed, not because the harm was small, but because we ourselves have been shown an ocean of mercy we could never repay.
-
-Mercy & Forgiveness. Jesus came for sinners—for those who have been sinned against and for those who have sinned. The hurt you feel is real; pretending otherwise helps no one. At the same time, the Sacrament of Reconciliation is the place where we lay down both our own sins and the right to hold others’ sins against them. There we meet the same mercy that raised Jesus from the dead.
-
-Practical Next Steps. 
-• Each morning for the next thirty days, pray one decade of the Rosary for the person who hurt you, using the Sorrowful Mysteries. 
-• Write a letter you will never send in which you name the specific harms and then, at the end, write “I release this debt to the mercy of God.” 
-• Speak with a trusted priest or spiritual director about the wound; do not carry it alone. 
-• If safe and appropriate, take one small concrete act of kindness toward that person (a prayer, a courteous word) as an act of obedience to Christ, not as a feeling.
-
-Kingdom Challenge. Your willingness to forgive, even when it costs, becomes a quiet witness that the world desperately needs. The freedom you gain will flow outward: you will have more room in your heart for your own family, for the poor, for the stranger, and for the work God has actually entrusted to you. That is how we build the Kingdom—one liberated heart at a time.
-
-Deeper Catholic Roots. The Catechism teaches that “it is not in our power not to feel or to forget” an offense, but the grace of the Holy Spirit can convert our hearts (CCC 2840). The parable of the Unforgiving Servant (Matthew 18:21-35) makes the same point with unforgettable force. St. John Paul II wrote in Dives in Misericordia that mercy is the ultimate way of living the Gospel. We do not forgive because the other person deserves it; we forgive because we have been forgiven first.
-
-WWJD is a formation aid aligned with the Magisterium. It is not a substitute for the sacraments or a priest. For grave matters, consult your pastor.
-''';
-
-  static const String _delveDeeperResponse = '''
-Delve Deeper – Additional Light from the Church’s Treasury
-
-The Catechism is very realistic about the cost of forgiveness. CCC 2840 reminds us that “it is not in our power not to feel or to forget” an offense. The grace we seek is not emotional amnesia but the supernatural strength to will the good of the one who hurt us. This is why the Lord’s Prayer is so demanding: “forgive us… as we forgive those who trespass against us.”
-
-Jesus gives us a second, even more searching parable in Matthew 18:21-35. Peter asks how many times—seven? Jesus answers seventy times seven and then tells the story of the servant who was forgiven a colossal debt yet refused to forgive a tiny one. The point is not that God is a harsh accountant; the point is that once we have received unmerited mercy, refusing to extend it distorts our own souls and blocks the very grace we need.
-
-St. Thomas Aquinas teaches that mercy is the virtue by which we are most closely conformed to God (Summa Theologiae II-II, q. 30). When we forgive, we are not saying “what happened is acceptable.” We are saying “I will no longer let this wound be the lens through which I view this person or my own future.” That is an act of spiritual authority given to us by Christ Himself (John 20:23).
-
-A further practical grace: many people find it helpful to pray the Chaplet of Divine Mercy for the specific individual, inserting their name at the end of each decade: “For the sake of His sorrowful Passion, have mercy on N. and on the whole world.” The very act of interceding for the one who wounded us often loosens the grip of resentment faster than anything else.
-
-If the relationship involves ongoing harm or danger, forgiveness does not require continued proximity or trust. Prudence and justice remain. A spiritual director can help you discern the concrete form love must take in your particular situation.
-
-WWJD is a formation aid aligned with the Magisterium. It is not a substitute for the sacraments or a priest. For grave matters, consult your pastor.
-''';
-  static const String _spiritualNourishmentWelcome = '''
-Welcome to Spiritual Nourishment.
-
-The Church, in her wisdom and love, offers us these powerful practices to draw us closer to Christ and to strengthen us for the journey. Each one is a precious gift meant to nourish our souls, deepen our relationship with God, and help us build His Kingdom on earth.
-
-Tap on any of the practices below to learn more about its importance and how it can transform your daily life.
-''';
-
-  @override
+    @override
   void initState() {
     super.initState();
-    if (!_hasShownInitialDemo) {
-      _loadInitialSampleConversation();
-      _hasShownInitialDemo = true;
-    }
+    _loadSeekingGodsWisdomScreen();
   }
 
-  void _loadInitialSampleConversation() {
-    _messages.addAll([
-      _ChatMessage(
-        isUser: true,
-        text: 'I’m struggling to forgive a family member who betrayed my trust. I feel angry and hurt every time I see them. What would Jesus do?',
-      ),
-      _ChatMessage(
-        isUser: false,
-        text: _primarySampleResponse,
-        isStructuredSample: true,
-      ),
-    ]);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-  }
+  void _loadSeekingGodsWisdomScreen() {
+    _messages.clear();
 
+    _messages.add(_ChatMessage(
+      isUser: false,
+      text: "Welcome to Seeking God's Wisdom.\n\n"
+          "This is the main space where you can bring any question, struggle, decision, or moral dilemma you are facing.\n\n"
+          "Type your question above, and WWJD will share faithful Catholic guidance rooted in Scripture, the Catechism, and Church teaching.\n\n"
+          "Here is an example of how the app works:",
+    ));
+
+    _messages.add(_ChatMessage(
+      isUser: true,
+      text: 'I’m struggling to forgive a family member who betrayed my trust. What would Jesus do?',
+    ));
+
+    _messages.add(_ChatMessage(
+      isUser: false,
+      text: _primarySampleResponse,
+      isStructuredSample: true,
+    ));
+
+    // Scroll to top
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0.0);
+      }
+    });
+  }  void _loadSeekingGodsWisdomScreen() { ... }
+
+  // ←←← PUT IT HERE ←←←
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 320),
-        curve: Curves.easeOutCubic,
-      );
+      Future.delayed(const Duration(milliseconds: 100), () {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeOutCubic,
+        );
+      });
     }
   }
 
-  void _removeLoadingMessageIfPresent() {
-    _messages.removeWhere((m) => m.isLoading);
-  }
-
-  Widget _buildLoadingIndicator() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.assistantBubble,
-        borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(18),
-          topRight: const Radius.circular(18),
-          bottomLeft: const Radius.circular(4),
-          bottomRight: const Radius.circular(18),
-        ),
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Image.asset(
-              'assets/images/wwjd_header.jpg',
-              height: kLoadingImageSize,
-              width: kLoadingImageSize,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const Icon(Icons.church, size: 42, color: AppColors.primaryMaroon),
-            ),
-          ),
-          const SizedBox(width: 14),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Seeking Wisdom...', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                Text('Praying with the Church for guidance...', style: TextStyle(fontSize: 14)),
-              ],
-            ),
-          ),
-          const CircularProgressIndicator(strokeWidth: 2.5),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _handleSend() async {
+    Future<void> _handleSend() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _isSending) return;
 
     setState(() {
       _messages.add(_ChatMessage(isUser: true, text: text));
-      _messages.add(_ChatMessage(isUser: false, text: '', isLoading: true));
       _isSending = true;
+      _isLoadingResponse = true;
     });
+
     _controller.clear();
-    _scrollToBottom();
+    _scrollToBottom();   // Scroll after user message
 
     try {
       if (_isMockMode) {
         await Future.delayed(const Duration(milliseconds: 800));
-        _removeLoadingMessageIfPresent();
+        final mockReply = 'Thank you for sharing this with our community. The WWJD framework applies directly here.';
+
         setState(() {
-          _messages.add(_ChatMessage(isUser: false, text: 'Thank you for trusting our community with this. The WWJD framework shown earlier applies directly to your situation. Would you like to "Delve Deeper" on the main response?'));
+          _messages.add(_ChatMessage(isUser: false, text: mockReply));
           _isSending = false;
+          _isLoadingResponse = false;
         });
       } else {
         await _callLiveGrokAPI(text);
       }
     } catch (e) {
-      _removeLoadingMessageIfPresent();
       setState(() {
-        _messages.add(_ChatMessage(isUser: false, text: '⚠️ Connection error. Please check your xAI API key in lib/core/config.dart\n\nError: $e'));
+        _messages.add(_ChatMessage(
+          isUser: false,
+          text: '⚠️ Connection error. Please check your xAI API key.',
+        ));
         _isSending = false;
+        _isLoadingResponse = false;
       });
     }
+
     _scrollToBottom();
   }
 
@@ -210,7 +144,8 @@ Tap on any of the practices below to learn more about its importance and how it 
           "messages": [
             {
               "role": "system",
-              "content": """You are WWJD, a warm, faithful Catholic moral advisor. 
+              "content": """You are WWJD, a warm, faithful Catholic moral advisor.
+               "You are WWJD, a warm, faithful Catholic advisor. Always respond using the exact 7-part structure from REQUIREMENTS.md **without any numbering** (1., 2., 3.). Make each section flow naturally as paragraphs and directly reference the user's specific situation in each section."
 Respond using this exact 7-part structure:
 1. Warm welcome to the community
 2. Reference to the Two Great Commandments
@@ -268,19 +203,19 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
     }
     _scrollToBottom();
   }
-void _showSpiritualNourishment([String? topic]) {
-  setState(() {
-    _selectedSpiritualTopic = topic;
-    
-    _messages.clear();
-    _messages.add(_ChatMessage(
-      isUser: false,
-      text: '',
-      isSpiritualNourishment: true,
-    ));
-  });
-  _scrollToBottom();
-}
+
+  void _showSpiritualNourishment() {
+    setState(() {
+      _messages.clear();
+      _messages.add(_ChatMessage(
+        isUser: false,
+        text: '',
+        isSpiritualNourishment: true,
+      ));
+    });
+    _scrollToBottom();
+  }
+
   void _showModeDialog() {
     showDialog(
       context: context,
@@ -316,7 +251,7 @@ void _showSpiritualNourishment([String? topic]) {
     );
   }
 
-     Widget _buildSidebar({bool isInDrawer = false}) {
+  Widget _buildSidebar({bool isInDrawer = false}) {
     return Container(
       width: isInDrawer ? null : kSidebarWidth,
       color: AppColors.sidebarBackground,
@@ -326,14 +261,12 @@ void _showSpiritualNourishment([String? topic]) {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Tools for the Journey
               const Padding(
                 padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
                 child: Text('Tools for the Journey', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ),
-              _sidebarTile(Icons.lightbulb_outline, "Seeking God's Wisdom", _showSeekingGodsWisdom),
+              _sidebarTile(Icons.balance, "Seeking God's Wisdom", _showSeekingGodsWisdom),
               _sidebarTile(Icons.card_giftcard, 'Using My Gifts for the Kingdom', _showUsingMyGifts),
-              _sidebarTile(Icons.balance, 'My Moral Dilemmas', _showMyMoralDilemmas),
               _sidebarTile(Icons.history, 'My History', _showMyHistory),
               _sidebarTile(Icons.people_outline, 'Walk Together', _showWalkTogether),
               _sidebarTile(Icons.policy_outlined, 'Terms & Privacy', _showTermsAndPrivacy),
@@ -343,17 +276,14 @@ void _showSpiritualNourishment([String? topic]) {
                 child: Divider(),
               ),
 
-              // Spiritual Nourishment Section
-// Spiritual Nourishment Section
-// Spiritual Nourishment Section
-const Padding(
-  padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
-  child: Text('Spiritual Nourishment', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-),
-_sidebarTile(Icons.church_outlined, 'Attend Mass', () => _showSpiritualNourishment('mass')),
-_sidebarTile(Icons.refresh, 'Go to Confession', () => _showSpiritualNourishment('confession')),
-_sidebarTile(Icons.favorite_border, 'Eucharistic Adoration', () => _showSpiritualNourishment('adoration')),
-_sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _showSpiritualNourishment('examination')),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
+                child: Text('Spiritual Nourishment', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+              _sidebarTile(Icons.church_outlined, 'Attend Mass', _showMass),
+              _sidebarTile(Icons.refresh, 'Go to Confession', _showConfession),
+              _sidebarTile(Icons.favorite_border, 'Eucharistic Adoration', _showAdoration),
+              _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', _showExaminationOfConscience),
             ],
           ),
         ),
@@ -361,7 +291,6 @@ _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _show
     );
   }
 
-  // Helper method for sidebar tiles
   Widget _sidebarTile(IconData icon, String label, VoidCallback onTap) {
     return ListTile(
       leading: Icon(icon, color: AppColors.primaryMaroon),
@@ -382,11 +311,15 @@ _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _show
     );
   }
 
-  void _showSeekingGodsWisdom() => _simpleDialog("Seeking God's Wisdom", "James 1:5 promises...");
+  //void _showSeekingGodsWisdom() => _simpleDialog("Seeking God's Wisdom", "James 1:5 promises...");
   void _showUsingMyGifts() => _simpleDialog("Using My Gifts for the Kingdom", "Each of us has received a gift...");
-  void _showMyMoralDilemmas() => _simpleDialog("My Moral Dilemmas", "This is the heart of our shared journey...");
+  //void _showMyMoralDilemmas() => _simpleDialog("My Moral Dilemmas", "This is the heart of our shared journey...");
   void _showMyHistory() => _simpleDialog("My History", "Saved conversations...");
   void _showTermsAndPrivacy() => _simpleDialog("Terms & Privacy", "Full policy...");
+  void _showMass() => _simpleDialog("Attend Mass", "The Eucharist is the source...");
+  void _showConfession() => _simpleDialog("Go to Confession", "God’s mercy is infinite...");
+  void _showAdoration() => _simpleDialog("Eucharistic Adoration", "Jesus is truly present...");
+  void _showExaminationOfConscience() => _simpleDialog("Examination of Conscience", "A simple nightly examen...");
 
   void _showWalkTogether() {
     showDialog(
@@ -453,15 +386,13 @@ _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _show
       child: Container(
         height: 90,
         decoration: const BoxDecoration(
-          color: Color(0xFF8B1E1E), // your primaryMaroon
-          boxShadow: [
-            BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
-          ],
+          color: Color(0xFF8B1E1E),
+          boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
         ),
         child: SafeArea(
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,   // This forces vertical center
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const Icon(Icons.church, size: 36, color: Colors.white),
               const SizedBox(width: 12),
@@ -469,16 +400,8 @@ _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _show
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    AppConfig.appName,
-                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                  Text(
-                    AppConfig.tagline,
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  Text(AppConfig.appName, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+                  Text(AppConfig.tagline, style: const TextStyle(fontSize: 12, color: Colors.white70), maxLines: 1, overflow: TextOverflow.ellipsis),
                 ],
               ),
               const SizedBox(width: 16),
@@ -498,6 +421,7 @@ _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _show
       ),
     );
   }
+
   Widget _buildEmptyState() {
     return const Center(
       child: Column(
@@ -511,7 +435,8 @@ _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _show
       ),
     );
   }
-      Widget _buildMessageBubble(_ChatMessage msg, int index) {
+
+  Widget _buildMessageBubble(_ChatMessage msg, int index) {
     final isUser = msg.isUser;
 
     return Align(
@@ -537,10 +462,7 @@ _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _show
             else if (msg.isStructuredSample)
               _StructuredWWJDResponse(text: msg.text, onDelveDeeper: _handleDelveDeeper)
             else if (msg.isSpiritualNourishment)
-  SpiritualNourishmentSection(
-    key: ValueKey(_selectedSpiritualTopic ?? 'default'),   // Forces recreation
-    initialTopic: _selectedSpiritualTopic,
-  )     // ← This must be active
+              const SpiritualNourishmentSection()
             else
               SelectableText(msg.text, style: const TextStyle(fontSize: 16, height: 1.55)),
 
@@ -565,6 +487,7 @@ _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _show
       ),
     );
   }
+
   Widget _buildInputBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
@@ -633,7 +556,7 @@ class _ChatMessage {
   final String text;
   final bool isStructuredSample;
   final bool isLoading;
-  final bool isSpiritualNourishment;   // ← Added
+  final bool isSpiritualNourishment;
 
   _ChatMessage({
     required this.isUser,

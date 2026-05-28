@@ -21,42 +21,64 @@ class _SpiritualNourishmentSectionState extends State<SpiritualNourishmentSectio
       'title': 'Attend Mass',
       'subtitle': 'The Source and Summit of Catholic Life',
       'body': '''
-The Eucharist is the source and summit of the Christian life (CCC 1324).
+The Holy Mass is the source and summit of the entire Christian life (CCC 1324). It is the highest form of prayer and worship we can offer to God.
 
-In the Holy Mass, we participate in the one eternal sacrifice of Jesus Christ on Calvary, made present for us today. We receive Our Lord truly, really, and substantially — Body, Blood, Soul, and Divinity.
+In every Mass, the one eternal sacrifice of Jesus Christ on Calvary is made present for us today. We are truly united with His Passion, Death, and Resurrection. We receive Our Lord Jesus Christ — Body, Blood, Soul, and Divinity — in the Holy Eucharist, the greatest gift God has given us.
 
-Jesus Himself said, “I am the living bread that came down from heaven... whoever eats this bread will live forever” (John 6:51).
+**Why attending Mass is so important:**
+- We give perfect worship to the Father through the Son in the Holy Spirit.
+- We are nourished by God’s Word and strengthened by the Eucharist.
+- We are united with the entire Church — on earth, in Purgatory, and in Heaven.
+- We receive the grace needed to live as faithful disciples and to build the Kingdom of God in our families, workplaces, and communities.
 
-Making the Mass the center of our week transforms us into the likeness of Christ.
+**Practical encouragement:**
+Make Sunday Mass the non-negotiable center of your week. When possible, attend daily Mass or at least one additional Mass during the week. Prepare your heart beforehand by reading the daily readings. Bring your joys, struggles, worries, and gratitude to the altar. Offer them to Jesus.
+
+The more faithfully we participate in the Mass, the more we are transformed into the likeness of Christ and empowered to love God and neighbor as we are called to do.
+
+**Important Note:** Catholics who are in a state of grace (having recently gone to Confession if needed) can receive Holy Communion at Mass.
 ''',
     },
     'confession': {
       'title': 'Go to Confession',
-      'subtitle': 'The Sacrament of God’s Mercy',
+      'subtitle': 'The Sacrament of God’s Infinite Mercy',
       'body': '''
-The Sacrament of Reconciliation is one of the greatest gifts Christ gave His Church.
+In the Sacrament of Reconciliation, we encounter the merciful Christ who says to each of us, “Your sins are forgiven. Go in peace.”
 
-Here we meet the merciful Jesus who says “Your sins are forgiven.”
+Regular Confession brings profound healing, peace of soul, clarity of conscience, and fresh grace to resist sin. It is one of the greatest gifts Jesus left His Church.
 
-Regular Confession brings healing, peace, clarity, and increased grace.
+Do not be afraid. The priest stands in the person of Christ, ready to offer you complete forgiveness and a new beginning.
 ''',
     },
     'adoration': {
       'title': 'Eucharistic Adoration',
       'subtitle': 'Sitting at the Feet of Jesus',
       'body': '''
-In Eucharistic Adoration, we adore Jesus Christ truly present in the Blessed Sacrament.
+Eucharistic Adoration is one of the most beautiful and powerful practices in Catholic life. Here, Jesus Christ is truly, really, and substantially present — Body, Blood, Soul, and Divinity — in the Blessed Sacrament.
 
-Even 15–30 minutes a week can bring profound peace and deeper intimacy with the Lord.
+**How to best experience Adoration:**
+- Come as you are. Bring your joys, struggles, dryness, or gratitude.
+- Spend time in silent listening, reading Scripture, or praying the Rosary.
+- Many find it helpful to journal thoughts or simply rest in His presence (“Jesus, I trust in You”).
+- Even 15–30 minutes a week can bring profound peace, clarity, and deeper love for the Lord.
+
+Many saints, including St. Thérèse of Lisieux, St. John Paul II, and St. Teresa of Calcutta, spent long hours before the Blessed Sacrament and credited it as the source of their strength and mission.
 ''',
     },
     'examination': {
       'title': 'Examination of Conscience',
-      'subtitle': 'Daily Review in God’s Light',
+      'subtitle': 'Daily Review in the Light of God’s Love',
       'body': '''
-A nightly Examination of Conscience is a powerful spiritual practice recommended by the saints.
+A nightly Examination of Conscience is a treasured spiritual practice recommended by the saints and the Church. It is not about scrupulous self-criticism, but about gently reviewing our day in the loving presence of God.
 
-It helps us become more aware of God’s presence and grow in virtue.
+A simple structured approach:
+1. **Thanksgiving** – Thank God for the gifts and graces of the day.
+2. **Prayer for Light** – Ask the Holy Spirit to help you see clearly.
+3. **Review** – Consider your thoughts, words, actions, and omissions. How did I love God? How did I love my neighbor?
+4. **Sorrow and Resolution** – Express sorrow for failings and make a concrete resolution for tomorrow.
+5. **Prayer** – End with an Act of Contrition and trust in God’s mercy.
+
+This daily habit builds self-awareness, fosters gratitude, and opens our hearts to continual conversion. Over time, it becomes a powerful tool for growth in virtue and intimacy with the Lord.
 ''',
     },
   };
