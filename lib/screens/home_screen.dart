@@ -20,8 +20,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<_ChatMessage> _messages = [];
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  bool _hasShownInitialDemo = false;
 
-  bool _isMockMode = true;
+  bool _isMockMode = false;   // Default to Live Mode
   bool _isSending = false;
 
   static const double kDesktopBreakpoint = 900.0;
@@ -32,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
   static const double kSidebarWidth = 290.0;
   static const double kMessageMaxWidthUser = 0.78;
   static const double kMessageMaxWidthAssistant = 0.92;
+  static const double kLoadingImageSize = 42.0;
 
   static const String _primarySampleResponse = '''
 Welcome, friend. In our Catholic community we believe there is no wound, no anger, and no betrayal too heavy to bring into the light of Christ. You are safe here. Many of us have carried the same heavy stones you describe.
@@ -74,7 +76,10 @@ WWJD is a formation aid aligned with the Magisterium. It is not a substitute for
   @override
   void initState() {
     super.initState();
-    _loadInitialSampleConversation();
+    if (!_hasShownInitialDemo) {
+      _loadInitialSampleConversation();
+      _hasShownInitialDemo = true;
+    }
   }
 
   void _loadInitialSampleConversation() {
@@ -102,12 +107,58 @@ WWJD is a formation aid aligned with the Magisterium. It is not a substitute for
     }
   }
 
+  void _removeLoadingMessageIfPresent() {
+    _messages.removeWhere((m) => m.isLoading);
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.assistantBubble,
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(18),
+          topRight: const Radius.circular(18),
+          bottomLeft: const Radius.circular(4),
+          bottomRight: const Radius.circular(18),
+        ),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Image.asset(
+              'assets/images/wwjd_header.jpg',
+              height: kLoadingImageSize,
+              width: kLoadingImageSize,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const Icon(Icons.church, size: 42, color: AppColors.primaryMaroon),
+            ),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Seeking Wisdom...', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                Text('Praying with the Church for guidance...', style: TextStyle(fontSize: 14)),
+              ],
+            ),
+          ),
+          const CircularProgressIndicator(strokeWidth: 2.5),
+        ],
+      ),
+    );
+  }
+
   Future<void> _handleSend() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _isSending) return;
 
     setState(() {
       _messages.add(_ChatMessage(isUser: true, text: text));
+      _messages.add(_ChatMessage(isUser: false, text: '', isLoading: true));
       _isSending = true;
     });
     _controller.clear();
@@ -115,22 +166,19 @@ WWJD is a formation aid aligned with the Magisterium. It is not a substitute for
 
     try {
       if (_isMockMode) {
-        await Future.delayed(const Duration(milliseconds: 700));
-        final mockReply = 'Thank you for trusting our community with this. The WWJD framework shown earlier applies directly to your situation. Would you like to "Delve Deeper" on the main response?';
-
+        await Future.delayed(const Duration(milliseconds: 800));
+        _removeLoadingMessageIfPresent();
         setState(() {
-          _messages.add(_ChatMessage(isUser: false, text: mockReply));
+          _messages.add(_ChatMessage(isUser: false, text: 'Thank you for trusting our community with this. The WWJD framework shown earlier applies directly to your situation. Would you like to "Delve Deeper" on the main response?'));
           _isSending = false;
         });
       } else {
         await _callLiveGrokAPI(text);
       }
     } catch (e) {
+      _removeLoadingMessageIfPresent();
       setState(() {
-        _messages.add(_ChatMessage(
-          isUser: false,
-          text: '⚠️ Connection error. Please check your xAI API key in lib/core/config.dart\n\nError: $e',
-        ));
+        _messages.add(_ChatMessage(isUser: false, text: '⚠️ Connection error. Please check your xAI API key in lib/core/config.dart\n\nError: $e'));
         _isSending = false;
       });
     }
@@ -152,7 +200,7 @@ WWJD is a formation aid aligned with the Magisterium. It is not a substitute for
           "messages": [
             {
               "role": "system",
-              "content": """You are a warm, faithful Catholic moral advisor named WWJD. 
+              "content": """You are WWJD, a warm, faithful Catholic moral advisor. 
 Respond using this exact 7-part structure:
 1. Warm welcome to the community
 2. Reference to the Two Great Commandments
@@ -175,6 +223,7 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
         final data = jsonDecode(response.body);
         final String liveResponse = data['choices'][0]['message']['content'] ?? 'No response received.';
 
+        _removeLoadingMessageIfPresent();
         setState(() {
           _messages.add(_ChatMessage(isUser: false, text: liveResponse));
         });
@@ -182,52 +231,31 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
         throw Exception('API Error ${response.statusCode}: ${response.body}');
       }
     } catch (e) {
+      _removeLoadingMessageIfPresent();
       setState(() {
         _messages.add(_ChatMessage(
           isUser: false,
-          text: '⚠️ Live API Error:\n$e\n\nPlease check your xAI key in config.dart and ensure it has credits.',
+          text: '⚠️ Live API Error:\n$e\n\nPlease verify your xAI key in config.dart is correct and active.',
         ));
       });
     } finally {
       setState(() => _isSending = false);
     }
-
     _scrollToBottom();
   }
-             void _handleDelveDeeper() {
-    // Get last 6 messages safely (without external package)
-    final startIndex = _messages.length > 6 ? _messages.length - 6 : 0;
-    final recentMessages = _messages.sublist(startIndex);
 
-    final recentContext = recentMessages.map((msg) {
-      final preview = msg.text.length > 300 
-          ? '${msg.text.substring(0, 300)}...' 
-          : msg.text;
-      return "${msg.isUser ? 'User' : 'WWJD'}: $preview";
-    }).join("\n\n");
-
-    final delvePrompt = """
-Here is the recent conversation:
-
-$recentContext
-
-Please provide a much deeper, richer Catholic exploration of the user's most recent question.
-Expand with more Scripture, CCC references, saints, and practical applications.
-Maintain the exact 7-part WWJD structure. Be warm and pastoral.
-""";
+  void _handleDelveDeeper() {
+    final lastUser = _messages.lastWhere((m) => m.isUser, orElse: () => _ChatMessage(isUser: true, text: "this topic"));
+    final delvePrompt = "Delve much deeper into the user's question: ${lastUser.text}";
 
     if (_isMockMode) {
       setState(() {
-        _messages.add(_ChatMessage(
-          isUser: false,
-          text: "🔍 Delving deeper in Mock Mode...\n\n${_delveDeeperResponse}",
-        ));
+        _messages.add(_ChatMessage(isUser: false, text: _delveDeeperResponse));
       });
     } else {
       _callLiveGrokAPI(delvePrompt);
       return;
     }
-
     _scrollToBottom();
   }
 
@@ -250,7 +278,7 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral.
             ),
             SwitchListTile(
               title: const Text('Live Mode'),
-              subtitle: const Text('Real Grok + xAI API (key from config.dart)'),
+              subtitle: const Text('Real Grok + xAI API'),
               value: !_isMockMode,
               onChanged: (val) {
                 setState(() => _isMockMode = !val);
@@ -266,7 +294,6 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral.
     );
   }
 
-  // Sidebar & Dialog helpers...
   Widget _buildSidebar({bool isInDrawer = false}) {
     return Container(
       width: isInDrawer ? null : kSidebarWidth,
@@ -289,7 +316,7 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral.
               _sidebarTile(Icons.policy_outlined, 'Terms & Privacy', _showTermsAndPrivacy),
 
               const Padding(padding: EdgeInsets.fromLTRB(20, 16, 20, 4), child: Divider()),
-              
+
               const Padding(
                 padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
                 child: Text('Spiritual Nourishment', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -375,9 +402,12 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral.
                           ? _buildEmptyState()
                           : ListView.builder(
                               controller: _scrollController,
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                              reverse: true,
                               itemCount: _messages.length,
-                              itemBuilder: (context, index) => _buildMessageBubble(_messages[index], index),
+                              itemBuilder: (context, index) {
+                                final msg = _messages[_messages.length - 1 - index];
+                                return _buildMessageBubble(msg, index);
+                              },
                             ),
                     ),
                     _buildInputBar(),
@@ -393,65 +423,75 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral.
 
   PreferredSizeWidget _buildAppBar(bool isWide) {
     return PreferredSize(
-      preferredSize: const Size.fromHeight(kAppBarHeight),
-      child: AppBar(
-        leading: isWide ? null : Builder(builder: (context) => IconButton(icon: const Icon(Icons.menu), onPressed: () => Scaffold.of(context).openDrawer())),
-        title: Row(
-          children: [
-            const Icon(Icons.church, size: 42, color: Colors.white),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(AppConfig.appName, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
-                  Text(AppConfig.tagline, style: const TextStyle(fontSize: 12.5, color: Colors.white70)),
-                ],
-              ),
-            ),
+      preferredSize: const Size.fromHeight(90),
+      child: Container(
+        height: 90,
+        decoration: const BoxDecoration(
+          color: Color(0xFF8B1E1E), // your primaryMaroon
+          boxShadow: [
+            BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
           ],
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: Image.asset('assets/images/wwjd_header.jpg', height: kHeaderLogoSize, width: kHeaderLogoSize, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.church, color: Colors.white70)),
-            ),
+        child: SafeArea(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,   // This forces vertical center
+            children: [
+              const Icon(Icons.church, size: 36, color: Colors.white),
+              const SizedBox(width: 12),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppConfig.appName,
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  Text(
+                    AppConfig.tagline,
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.asset(
+                  'assets/images/wwjd_header.jpg',
+                  height: 58,
+                  width: 58,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.church, size: 48, color: Colors.white70),
+                ),
+              ),
+            ],
           ),
-          IconButton(
-            icon: Icon(_isMockMode ? Icons.science_outlined : Icons.cloud_outlined),
-            onPressed: _showModeDialog,
-          ),
-        ],
+        ),
       ),
     );
   }
-
   Widget _buildEmptyState() {
-    return Center(
+    return const Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.church, size: kEmptyStateIconSize, color: AppColors.primaryMaroon.withValues(alpha: 0.15)),
-          const SizedBox(height: 24),
-          const Text('Peace be with you.', style: TextStyle(fontSize: 22)),
-          const Text('What is weighing on your heart today?', style: TextStyle(fontSize: 18)),
+          Icon(Icons.church, size: kEmptyStateIconSize, color: AppColors.primaryMaroon),
+          SizedBox(height: 24),
+          Text('Peace be with you.', style: TextStyle(fontSize: 22)),
+          Text('What is weighing on your heart today?', style: TextStyle(fontSize: 18)),
         ],
       ),
     );
   }
-
-    Widget _buildMessageBubble(_ChatMessage msg, int index) {
+  Widget _buildMessageBubble(_ChatMessage msg, int index) {
     final isUser = msg.isUser;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * (isUser ? kMessageMaxWidthUser : kMessageMaxWidthAssistant),
-        ),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * (isUser ? kMessageMaxWidthUser : kMessageMaxWidthAssistant)),
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -466,17 +506,14 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral.
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            msg.isStructuredSample
-                ? _StructuredWWJDResponse(
-                    text: msg.text,
-                    onDelveDeeper: _handleDelveDeeper,
-                  )
-                : SelectableText(
-                    msg.text,
-                    style: const TextStyle(fontSize: 16, height: 1.55),
-                  ),
+            if (msg.isLoading)
+              _buildLoadingIndicator()
+            else if (msg.isStructuredSample)
+              _StructuredWWJDResponse(text: msg.text, onDelveDeeper: _handleDelveDeeper)
+            else
+              SelectableText(msg.text, style: const TextStyle(fontSize: 16, height: 1.55)),
 
-            if (!isUser) ...[
+            if (!isUser && !msg.isLoading) ...[
               const SizedBox(height: 10),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -487,14 +524,8 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral.
                     label: const Text('Delve Deeper'),
                     style: TextButton.styleFrom(foregroundColor: AppColors.primaryMaroon),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.copy, size: 19),
-                    onPressed: () => _copyToClipboard(msg.text),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.share, size: 19),
-                    onPressed: () => _shareMessage(msg.text),
-                  ),
+                  IconButton(icon: const Icon(Icons.copy, size: 19), onPressed: () => _copyToClipboard(msg.text)),
+                  IconButton(icon: const Icon(Icons.share, size: 19), onPressed: () => _shareMessage(msg.text)),
                 ],
               ),
             ],
@@ -520,7 +551,7 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral.
               minLines: 1,
               textInputAction: TextInputAction.send,
               onSubmitted: (_) => _handleSend(),
-              decoration: const InputDecoration(hintText: 'Bring your question or struggle…'),
+              decoration: const InputDecoration(hintText: 'Bring your question or struggle… we walk together'),
             ),
           ),
           const SizedBox(width: 10),
@@ -541,12 +572,11 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral.
   }
 }
 
-// Structured Response Widget
 class _StructuredWWJDResponse extends StatelessWidget {
   final String text;
   final VoidCallback onDelveDeeper;
 
-  const _StructuredWWJDResponse({required this.text, required this.onDelveDeeper, super.key});
+  const _StructuredWWJDResponse({required this.text, required this.onDelveDeeper});
 
   @override
   Widget build(BuildContext context) {
@@ -572,6 +602,12 @@ class _ChatMessage {
   final bool isUser;
   final String text;
   final bool isStructuredSample;
+  final bool isLoading;
 
-  _ChatMessage({required this.isUser, required this.text, this.isStructuredSample = false});
+  _ChatMessage({
+    required this.isUser,
+    required this.text,
+    this.isStructuredSample = false,
+    this.isLoading = false,
+  });
 }

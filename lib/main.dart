@@ -33,21 +33,21 @@ class WWJDApp extends StatelessWidget {
       useMaterial3: true,
       colorScheme: base,
       scaffoldBackgroundColor: AppColors.parchment,
-      appBarTheme: AppBarTheme(
+      appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.primaryMaroon,
         foregroundColor: AppColors.textOnMaroon,
         elevation: 0,
         centerTitle: false,
-        titleTextStyle: const TextStyle(
+        titleTextStyle: TextStyle(
           fontSize: 28,
           fontWeight: FontWeight.bold,
           color: AppColors.textOnMaroon,
         ),
       ),
-      cardTheme: CardThemeData(
+      cardTheme: const CardThemeData(
         color: Colors.white,
         elevation: 1,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(16))),
       ),
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(
