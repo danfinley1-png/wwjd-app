@@ -5,7 +5,9 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../core/config.dart';
+import '../widgets/spiritual_nourishment_section.dart';
 import '../core/app_colors.dart';
+
 
 /// The primary screen for the WWJD Catholic Dialog experience.
 
@@ -24,6 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool _isMockMode = false;   // Default to Live Mode
   bool _isSending = false;
+  String? _selectedSpiritualTopic;
 
   static const double kDesktopBreakpoint = 900.0;
   static const double kHeaderLogoSize = 74.0;
@@ -71,6 +74,13 @@ A further practical grace: many people find it helpful to pray the Chaplet of Di
 If the relationship involves ongoing harm or danger, forgiveness does not require continued proximity or trust. Prudence and justice remain. A spiritual director can help you discern the concrete form love must take in your particular situation.
 
 WWJD is a formation aid aligned with the Magisterium. It is not a substitute for the sacraments or a priest. For grave matters, consult your pastor.
+''';
+  static const String _spiritualNourishmentWelcome = '''
+Welcome to Spiritual Nourishment.
+
+The Church, in her wisdom and love, offers us these powerful practices to draw us closer to Christ and to strengthen us for the journey. Each one is a precious gift meant to nourish our souls, deepen our relationship with God, and help us build His Kingdom on earth.
+
+Tap on any of the practices below to learn more about its importance and how it can transform your daily life.
 ''';
 
   @override
@@ -258,7 +268,19 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
     }
     _scrollToBottom();
   }
-
+void _showSpiritualNourishment([String? topic]) {
+  setState(() {
+    _selectedSpiritualTopic = topic;
+    
+    _messages.clear();
+    _messages.add(_ChatMessage(
+      isUser: false,
+      text: '',
+      isSpiritualNourishment: true,
+    ));
+  });
+  _scrollToBottom();
+}
   void _showModeDialog() {
     showDialog(
       context: context,
@@ -294,7 +316,7 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
     );
   }
 
-  Widget _buildSidebar({bool isInDrawer = false}) {
+     Widget _buildSidebar({bool isInDrawer = false}) {
     return Container(
       width: isInDrawer ? null : kSidebarWidth,
       color: AppColors.sidebarBackground,
@@ -304,6 +326,7 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Tools for the Journey
               const Padding(
                 padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
                 child: Text('Tools for the Journey', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -315,16 +338,22 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
               _sidebarTile(Icons.people_outline, 'Walk Together', _showWalkTogether),
               _sidebarTile(Icons.policy_outlined, 'Terms & Privacy', _showTermsAndPrivacy),
 
-              const Padding(padding: EdgeInsets.fromLTRB(20, 16, 20, 4), child: Divider()),
-
               const Padding(
-                padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
-                child: Text('Spiritual Nourishment', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+                child: Divider(),
               ),
-              _sidebarTile(Icons.church_outlined, 'Attend Mass', _showMass),
-              _sidebarTile(Icons.refresh, 'Go to Confession', _showConfession),
-              _sidebarTile(Icons.favorite_border, 'Eucharistic Adoration', _showAdoration),
-              _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', _showExaminationOfConscience),
+
+              // Spiritual Nourishment Section
+// Spiritual Nourishment Section
+// Spiritual Nourishment Section
+const Padding(
+  padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
+  child: Text('Spiritual Nourishment', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+),
+_sidebarTile(Icons.church_outlined, 'Attend Mass', () => _showSpiritualNourishment('mass')),
+_sidebarTile(Icons.refresh, 'Go to Confession', () => _showSpiritualNourishment('confession')),
+_sidebarTile(Icons.favorite_border, 'Eucharistic Adoration', () => _showSpiritualNourishment('adoration')),
+_sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _showSpiritualNourishment('examination')),
             ],
           ),
         ),
@@ -332,6 +361,7 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
     );
   }
 
+  // Helper method for sidebar tiles
   Widget _sidebarTile(IconData icon, String label, VoidCallback onTap) {
     return ListTile(
       leading: Icon(icon, color: AppColors.primaryMaroon),
@@ -357,10 +387,6 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
   void _showMyMoralDilemmas() => _simpleDialog("My Moral Dilemmas", "This is the heart of our shared journey...");
   void _showMyHistory() => _simpleDialog("My History", "Saved conversations...");
   void _showTermsAndPrivacy() => _simpleDialog("Terms & Privacy", "Full policy...");
-  void _showMass() => _simpleDialog("Attend Mass", "The Eucharist is the source...");
-  void _showConfession() => _simpleDialog("Go to Confession", "God’s mercy is infinite...");
-  void _showAdoration() => _simpleDialog("Eucharistic Adoration", "Jesus is truly present...");
-  void _showExaminationOfConscience() => _simpleDialog("Examination of Conscience", "A simple nightly examen...");
 
   void _showWalkTogether() {
     showDialog(
@@ -485,7 +511,7 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
       ),
     );
   }
-  Widget _buildMessageBubble(_ChatMessage msg, int index) {
+      Widget _buildMessageBubble(_ChatMessage msg, int index) {
     final isUser = msg.isUser;
 
     return Align(
@@ -510,10 +536,15 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
               _buildLoadingIndicator()
             else if (msg.isStructuredSample)
               _StructuredWWJDResponse(text: msg.text, onDelveDeeper: _handleDelveDeeper)
+            else if (msg.isSpiritualNourishment)
+  SpiritualNourishmentSection(
+    key: ValueKey(_selectedSpiritualTopic ?? 'default'),   // Forces recreation
+    initialTopic: _selectedSpiritualTopic,
+  )     // ← This must be active
             else
               SelectableText(msg.text, style: const TextStyle(fontSize: 16, height: 1.55)),
 
-            if (!isUser && !msg.isLoading) ...[
+            if (!isUser && !msg.isLoading && !msg.isSpiritualNourishment) ...[
               const SizedBox(height: 10),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -534,7 +565,6 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching. Never spea
       ),
     );
   }
-
   Widget _buildInputBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
@@ -603,11 +633,13 @@ class _ChatMessage {
   final String text;
   final bool isStructuredSample;
   final bool isLoading;
+  final bool isSpiritualNourishment;   // ← Added
 
   _ChatMessage({
     required this.isUser,
     required this.text,
     this.isStructuredSample = false,
     this.isLoading = false,
+    this.isSpiritualNourishment = false,
   });
 }
