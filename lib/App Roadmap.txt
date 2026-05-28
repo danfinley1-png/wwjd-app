@@ -1,0 +1,22 @@
+Spiritual Nourishment:
+Add a broader section that reinforces the importance of each in our Faith life and importance to building the Kingdom on earth. Invite/encourage the user to utilize these gifts.  Make recommendation on how to get the most out of each. 
+
+Walk Together
+For each user inquiry, provide the ability to share with the community. When sharing caution the user to ensure no personal or confidential information is being unintentionally shared.
+Within the Walk Together section, show questions that have been shared with the ability to open the response. Enable the ability to up vote the topic and respond with simple icons for thumbs up, insightful, praying hands, heart, celebrate.
+
+Privacy -
+Create a privacy policy that is accurate and enforceable. WWJD will not share personal information and will only display questions that have been shared by the user. With sufficient data to protect anonymity, WWJD may provide analytics that highlight the shared challenges and journey we are on.
+
+Log-in information - create a log-in process that captures basic demographic information. This process will be used for future paid tier services. Log in will also enable the ability to maintain history for users and protect their confidential data on the app.
+
+Speech enable the application for questions and audio of responses. Pair with full text history.i
+
+Using My Gifts for the Kingdom is a combination of goals, specific objectives, the ability to track progress and capture journal type reflection on accomplishments and challenges. 
+
+Tools for the Journey:
+Seeking God's Wisdom - this is the main screen that opens. Provide an explanation of the process. "bring your questions and struggles and WWJD will share Church teachings that can help you on your journey and grow in faith all based on the authentic teaching of the Catholic Church.
+Walk Together
+Using My Gifts for the Kingdom
+My History - show prior questions and responses with date, whether or not it has been shared and ability to click through to the view of the shared post.
+Remove "My Moral Dilemmas"
