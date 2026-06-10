@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../core/config.dart';
 import '../widgets/spiritual_nourishment_section.dart';
 import '../core/app_colors.dart';
+import '../walk_together_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,6 +21,10 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<_ChatMessage> _messages = [];
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  // Shared journeys for Walk Together (persisted in memory for now)
+  final List<Map<String, dynamic>> _sharedJourneys = [];
+  final List<_ChatMessage> _savedSeekingWisdomMessages = [];
+  final GlobalKey _latestMessageKey = GlobalKey();
 
   bool _isMockMode = false;
   bool _isSending = false;
@@ -43,28 +48,30 @@ Delve Deeper – Additional Light from the Church’s Treasury
     _loadSeekingGodsWisdomScreen();
   }
 
-  void _loadSeekingGodsWisdomScreen() {
+    void _loadSeekingGodsWisdomScreen() {
     setState(() {
       _messages.clear();
-      _messages.add(_ChatMessage(
-        isUser: false,
-        text: "Welcome to Seeking God's Wisdom.\n\n"
-            "This is the main space where you can bring any question, struggle, decision, or moral dilemma you are facing.\n\n"
-            "Type your question above, and WWJD will share faithful Catholic guidance rooted in Scripture, the Catechism, and Church teaching.",
-      ));
+      // Only show welcome if no user messages yet
+      if (_messages.isEmpty || !_messages.any((m) => m.isUser)) {
+        _messages.add(_ChatMessage(
+          isUser: false,
+          text: "Welcome to Seeking God's Wisdom.\n\n"
+              "Bring any question, struggle, or decision.",
+        ));
+      }
+      _savedSeekingWisdomMessages.clear();
+      _savedSeekingWisdomMessages.addAll(List.from(_messages));
     });
-
     _scrollToTop();
   }
   void _showSeekingGodsWisdom() {
     setState(() {
-      _messages.clear();
-      _messages.add(_ChatMessage(
-        isUser: false,
-        text: "Welcome to Seeking God's Wisdom.\n\n"
-            "This is the main space where you can bring any question, struggle, decision, or moral dilemma you are facing.\n\n"
-            "Type your question in the box above, and WWJD will share faithful Catholic guidance rooted in Scripture, the Catechism, and the living tradition of the Church.",
-      ));
+      if (_savedSeekingWisdomMessages.isEmpty) {
+        _savedSeekingWisdomMessages.addAll(List.from(_messages));
+      } else {
+        _messages.clear();
+        _messages.addAll(_savedSeekingWisdomMessages);
+      }
     });
     _scrollToTop();
   }
@@ -106,17 +113,75 @@ Delve Deeper – Additional Light from the Church’s Treasury
     });
     _scrollToTop();
   }
+  void _shareToWalkTogether(_ChatMessage msg) {
+    // Find most recent user question
+    String userQuestion = "No specific question found";
+    for (int i = _messages.length - 1; i >= 0; i--) {
+      if (_messages[i].isUser) {
+        userQuestion = _messages[i].text;
+        break;
+      }
+    }
+
+    // Build full response by collecting the latest AI response + any Delve Deeper
+    String fullResponse = msg.text;
+
+    // Look for Delve Deeper in recent messages
+    for (int i = _messages.length - 1; i >= 0; i--) {
+      if (_messages[i].text.contains("Delve Deeper") || 
+          (_messages[i].text.length > 300 && !fullResponse.contains(_messages[i].text))) {
+        fullResponse += "\n\n--- Delve Deeper ---\n${_messages[i].text}";
+        break;
+      }
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Share to Walk Together'),
+        content: const Text(
+          'This will share your question + the complete WWJD response (including Delve Deeper if available).',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+
+              final journey = {
+                'id': DateTime.now().millisecondsSinceEpoch,
+                'title': 'Shared Ethical Journey',
+                'question': userQuestion,
+                'response': fullResponse,
+                'upvotes': 0,
+                'timestamp': DateTime.now(),
+              };
+
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => WalkTogetherScreen(sharedJourney: journey),
+                ),
+              );
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Shared anonymously to Walk Together!')),
+              );
+            },
+            child: const Text('Share Anonymously', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _showWalkTogether() {
-    setState(() {
-      _messages.clear();
-      _messages.add(_ChatMessage(
-        isUser: false,
-        text: "**Walk Together**\n\n"
-            "Community feature coming soon — where the faithful can share testimonies, prayer requests, and encouragement.",
-      ));
-    });
-    _scrollToTop();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const WalkTogetherScreen(),
+      ),
+    );
   }
 
   void _showTermsAndPrivacy() {
@@ -158,17 +223,22 @@ Delve Deeper – Additional Light from the Church’s Treasury
     _messages.removeWhere((m) => m.isLoading);
   }
 
-    void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      // Small delay to let the UI update with new content
-      Future.delayed(const Duration(milliseconds: 100), () {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 400),
-          curve: Curves.easeOutCubic,
-        );
-      });
-    }
+  void _scrollToNewResponse() {
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (_latestMessageKey.currentContext != null) {
+        final RenderBox? renderBox = _latestMessageKey.currentContext!.findRenderObject() as RenderBox?;
+        if (renderBox != null) {
+          final position = renderBox.localToGlobal(Offset.zero);
+          final scrollOffset = _scrollController.offset + position.dy - 100; // 100px padding from top
+
+          _scrollController.animateTo(
+            scrollOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      }
+    });
   }
 
   Future<void> _handleSend() async {
@@ -181,7 +251,7 @@ Delve Deeper – Additional Light from the Church’s Treasury
       _isSending = true;
     });
     _controller.clear();
-    _scrollToBottom();
+    _scrollToNewResponse();
 
     try {
       if (_isMockMode) {
@@ -201,7 +271,7 @@ Delve Deeper – Additional Light from the Church’s Treasury
         _isSending = false;
       });
     }
-    _scrollToBottom();
+    _scrollToNewResponse();
   }
 
   Future<void> _callLiveGrokAPI(String userMessage) async {
@@ -274,7 +344,7 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching."""
     setState(() {
       _messages.add(_ChatMessage(isUser: false, text: '', isLoading: true)); // Show image
     });
-    _scrollToBottom();
+    _scrollToNewResponse();
 
     final lastUserMessage = _messages.lastWhere(
       (m) => m.isUser,
@@ -296,7 +366,7 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
       return;
     }
 
-    _scrollToBottom();
+    _scrollToNewResponse();
   }
 
   // Sidebar and other methods remain unchanged
@@ -484,12 +554,14 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
     );
   }
 
-    Widget _buildMessageBubble(_ChatMessage msg, int index) {
+ Widget _buildMessageBubble(_ChatMessage msg, int index) {
     final isUser = msg.isUser;
+    final isLatestAI = !isUser && index == _messages.length - 1;   // Add this line
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
+        key: isLatestAI ? _latestMessageKey : null,   // Add this line
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * (isUser ? kMessageMaxWidthUser : kMessageMaxWidthAssistant),
         ),
@@ -516,8 +588,9 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
             else
               SelectableText(msg.text, style: const TextStyle(fontSize: 16, height: 1.55)),
 
-            if (!isUser && !msg.isLoading && !msg.isSpiritualNourishment) ...[
-              const SizedBox(height: 10),
+            // Action buttons for AI responses only
+            if (!isUser && !msg.isLoading && !msg.isSpiritualNourishment && !msg.isStructuredSample) ...[
+              const SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -527,42 +600,26 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
                     label: const Text('Delve Deeper'),
                     style: TextButton.styleFrom(foregroundColor: AppColors.primaryMaroon),
                   ),
-                  IconButton(icon: const Icon(Icons.copy, size: 19), onPressed: () => _copyToClipboard(msg.text)),
-                  IconButton(icon: const Icon(Icons.share, size: 19), onPressed: () => _shareMessage(msg.text)),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.copy, size: 19),
+                    onPressed: () => _copyToClipboard(msg.text),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.share, size: 19),
+                    onPressed: () => _shareMessage(msg.text),
+                  ),
+                  TextButton.icon(
+                    icon: const Icon(Icons.share_outlined, size: 18),
+                    label: const Text('Share Anonymously'),
+                    onPressed: () => _shareToWalkTogether(msg),
+                    style: TextButton.styleFrom(foregroundColor: AppColors.primaryMaroon),
+                  ),
                 ],
               ),
             ],
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildLoadingIndicator() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Image.asset(
-            'assets/images/wwjd_header.jpg',
-            height: 52,
-            width: 52,
-            fit: BoxFit.cover,
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            "Seeking God's Wisdom...",
-            style: TextStyle(fontSize: 14.5, color: Colors.grey, fontStyle: FontStyle.italic),
-          ),
-          const SizedBox(height: 8),
-          const SizedBox(
-            width: 28,
-            child: LinearProgressIndicator(
-              color: AppColors.primaryMaroon,
-              minHeight: 2,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -607,7 +664,38 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
       ),
     );
   }
+
+  Widget _buildLoadingIndicator() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image.asset(
+            'assets/images/wwjd_header.jpg',
+            height: 52,
+            width: 52,
+            fit: BoxFit.cover,
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            "Seeking God's Wisdom...",
+            style: TextStyle(fontSize: 14.5, color: Colors.grey, fontStyle: FontStyle.italic),
+          ),
+          const SizedBox(height: 8),
+          const SizedBox(
+            width: 28,
+            child: LinearProgressIndicator(
+              color: AppColors.primaryMaroon,
+              minHeight: 2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
+
+// ==================== MODELS DEFINED OUTSIDE THE STATE CLASS ====================
 
 class _ChatMessage {
   final bool isUser;
@@ -624,6 +712,7 @@ class _ChatMessage {
     this.isSpiritualNourishment = false,
   });
 }
+
 class _StructuredWWJDResponse extends StatelessWidget {
   final String text;
   final VoidCallback onDelveDeeper;

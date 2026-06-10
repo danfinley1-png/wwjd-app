@@ -44,13 +44,19 @@ class _HomeScreenState extends State<HomeScreen> {
   static const String _apiUrl = 'https://api.x.ai/v1/chat/completions';
   static const String model = "grok-4-1-fast-reasoning";
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
+  void _scrollToNewResponse() {
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (_scrollController.hasClients && _messages.isNotEmpty) {
+        // Scroll so the newest message starts near the top of the viewport
+        final maxExtent = _scrollController.position.maxScrollExtent;
+        
+        // This positions the start of the newest content near the top
+        final targetScroll = (maxExtent - 200).clamp(0.0, maxExtent);  
+
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
+          targetScroll,
+          duration: const Duration(milliseconds: 450),
+          curve: Curves.easeOutCubic,
         );
       }
     });
@@ -70,7 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _isLoading = true;
     });
     _controller.clear();
-    _scrollToBottom();
+    _scrollToNewResponse();
 
     try {
       final response = await http.post(
@@ -114,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _messages.add({'role': 'assistant', 'content': 'Connection error. Please try again.'}));
     } finally {
       setState(() => _isLoading = false);
-      _scrollToBottom();
+      _scrollToNewResponse();
     }
   }
 
