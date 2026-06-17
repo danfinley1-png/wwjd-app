@@ -9,6 +9,7 @@ import '../core/config.dart';
 import '../widgets/spiritual_nourishment_section.dart';
 import '../core/app_colors.dart';
 import '../walk_together_screen.dart';
+import '../my_history_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -23,7 +24,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final ScrollController _scrollController = ScrollController();
   // Shared journeys for Walk Together (persisted in memory for now)
   final List<Map<String, dynamic>> _sharedJourneys = [];
-  final List<_ChatMessage> _savedSeekingWisdomMessages = [];
+  static final List<_ChatMessage> _sessionHistory = [];
   final GlobalKey _latestMessageKey = GlobalKey();
 
   bool _isMockMode = false;
@@ -48,29 +49,29 @@ Delve Deeper – Additional Light from the Church’s Treasury
     _loadSeekingGodsWisdomScreen();
   }
 
-    void _loadSeekingGodsWisdomScreen() {
+  void _loadSeekingGodsWisdomScreen() {
     setState(() {
       _messages.clear();
-      // Only show welcome if no user messages yet
-      if (_messages.isEmpty || !_messages.any((m) => m.isUser)) {
-        _messages.add(_ChatMessage(
-          isUser: false,
-          text: "Welcome to Seeking God's Wisdom.\n\n"
-              "Bring any question, struggle, or decision.",
-        ));
-      }
-      _savedSeekingWisdomMessages.clear();
-      _savedSeekingWisdomMessages.addAll(List.from(_messages));
+      _messages.add(_ChatMessage(
+        isUser: false,
+        text: "Welcome to Seeking God's Wisdom.\n\nBring any question, struggle, or decision.",
+      ));
+      _sessionHistory.clear();
+      _sessionHistory.addAll(List.from(_messages));
     });
     _scrollToTop();
   }
+
   void _showSeekingGodsWisdom() {
+    print("DEBUG: Returning to Seeking God's Wisdom. History size: ${_sessionHistory.length}");
     setState(() {
-      if (_savedSeekingWisdomMessages.isEmpty) {
-        _savedSeekingWisdomMessages.addAll(List.from(_messages));
-      } else {
-        _messages.clear();
-        _messages.addAll(_savedSeekingWisdomMessages);
+      _messages.clear();
+      _messages.addAll(_sessionHistory);
+      if (_messages.isEmpty) {
+        _messages.add(_ChatMessage(
+          isUser: false,
+          text: "Welcome to Seeking God's Wisdom.\n\nBring any question, struggle, or decision.",
+        ));
       }
     });
     _scrollToTop();
@@ -103,33 +104,35 @@ Delve Deeper – Additional Light from the Church’s Treasury
   }
 
   void _showMyHistory() {
-    setState(() {
-      _messages.clear();
-      _messages.add(_ChatMessage(
-        isUser: false,
-        text: "**My History**\n\n"
-            "Saved conversations and past reflections will appear here in a future update.",
-      ));
-    });
-    _scrollToTop();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MyHistoryScreen(savedMessages: _sessionHistory),
+      ),
+    );
   }
-  void _shareToWalkTogether(_ChatMessage msg) {
-    // Find most recent user question
+
+      void _shareToWalkTogether(_ChatMessage msg) {
+    // Find the user question that immediately precedes this AI response
     String userQuestion = "No specific question found";
+    bool foundResponse = false;
+
     for (int i = _messages.length - 1; i >= 0; i--) {
-      if (_messages[i].isUser) {
+      if (_messages[i] == msg) {   // Found the current response
+        foundResponse = true;
+        continue;
+      }
+      if (foundResponse && _messages[i].isUser) {
         userQuestion = _messages[i].text;
         break;
       }
     }
 
-    // Build full response by collecting the latest AI response + any Delve Deeper
     String fullResponse = msg.text;
 
-    // Look for Delve Deeper in recent messages
+    // Include Delve Deeper if present
     for (int i = _messages.length - 1; i >= 0; i--) {
-      if (_messages[i].text.contains("Delve Deeper") || 
-          (_messages[i].text.length > 300 && !fullResponse.contains(_messages[i].text))) {
+      if (_messages[i].text.contains("Delve Deeper") && _messages[i].text != fullResponse) {
         fullResponse += "\n\n--- Delve Deeper ---\n${_messages[i].text}";
         break;
       }
@@ -140,7 +143,9 @@ Delve Deeper – Additional Light from the Church’s Treasury
       builder: (ctx) => AlertDialog(
         title: const Text('Share to Walk Together'),
         content: const Text(
-          'This will share your question + the complete WWJD response (including Delve Deeper if available).',
+          'This will share an anonymized version of your question and the WWJD response.\n\n'
+          'Caution: Ensure no personal or confidential information is being shared.\n'
+          'Only anonymized content will be visible to others.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -196,6 +201,7 @@ Delve Deeper – Additional Light from the Church’s Treasury
     });
     _scrollToTop();
   }
+
   void _showSpiritualNourishment([String? topic]) {
     _selectedSpiritualTopic = topic;
 
@@ -208,7 +214,7 @@ Delve Deeper – Additional Light from the Church’s Treasury
       ));
     });
 
-    _scrollToTop();   // Scroll to top so content is visible
+    _scrollToTop();
   }
 
   void _scrollToTop() {
@@ -219,26 +225,24 @@ Delve Deeper – Additional Light from the Church’s Treasury
     });
   }
 
-  void _removeLoadingMessageIfPresent() {
-    _messages.removeWhere((m) => m.isLoading);
+  void _scrollToLoading() {
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0.0);
+      }
+    });
   }
 
   void _scrollToNewResponse() {
-    Future.delayed(const Duration(milliseconds: 400), () {
-      if (_latestMessageKey.currentContext != null) {
-        final RenderBox? renderBox = _latestMessageKey.currentContext!.findRenderObject() as RenderBox?;
-        if (renderBox != null) {
-          final position = renderBox.localToGlobal(Offset.zero);
-          final scrollOffset = _scrollController.offset + position.dy - 100; // 100px padding from top
-
-          _scrollController.animateTo(
-            scrollOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
-            duration: const Duration(milliseconds: 400),
-            curve: Curves.easeOutCubic,
-          );
-        }
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0.0);   // Force to the very top of the page
       }
     });
+  }
+
+  void _removeLoadingMessageIfPresent() {
+    _messages.removeWhere((m) => m.isLoading);
   }
 
   Future<void> _handleSend() async {
@@ -247,30 +251,27 @@ Delve Deeper – Additional Light from the Church’s Treasury
 
     setState(() {
       _messages.add(_ChatMessage(isUser: true, text: text));
-      _messages.add(_ChatMessage(isUser: false, text: '', isLoading: true)); // Show image
+      _messages.add(_ChatMessage(isUser: false, text: '', isLoading: true));
       _isSending = true;
     });
     _controller.clear();
-    _scrollToNewResponse();
+    _scrollToLoading();                    // Ensure loading image is visible
 
     try {
       if (_isMockMode) {
         await Future.delayed(const Duration(milliseconds: 800));
-        _removeLoadingMessageIfPresent();   // ← Clean first
-        setState(() {
-          _messages.add(_ChatMessage(isUser: false, text: 'Thank you for trusting our community...'));
-          _isSending = false;
-        });
       } else {
         await _callLiveGrokAPI(text);
+        return;
       }
     } catch (e) {
-      _removeLoadingMessageIfPresent();
-      setState(() {
-        _messages.add(_ChatMessage(isUser: false, text: '⚠️ Connection error...'));
-        _isSending = false;
-      });
+      // error handling
     }
+
+    setState(() {
+      _removeLoadingMessageIfPresent();
+      _isSending = false;
+    });
     _scrollToNewResponse();
   }
 
@@ -295,7 +296,7 @@ Delve Deeper – Additional Light from the Church’s Treasury
 Current time: $greeting on ${DateFormat('EEEE').format(now)}.
 
 Respond in a natural, flowing style **without any numbering** (no 1., 2., 3., etc.). 
-Let each section transition smoothly as paragraphs and directly reference USer's specific situation.
+Let each section transition smoothly as paragraphs and directly reference the user's specific situation.
 Do not use the language that makes the application respond as a person.
 
 Core Structure to follow naturally:
@@ -320,29 +321,39 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching."""
         final data = jsonDecode(response.body);
         final String liveResponse = data['choices'][0]['message']['content'] ?? 'No response received.';
 
-        _removeLoadingMessageIfPresent();   // ← Important
         setState(() {
-          _messages.insert(0, _ChatMessage(isUser: false, text: liveResponse));
+          _removeLoadingMessageIfPresent();
+          _messages.add(_ChatMessage(isUser: false, text: liveResponse));
+          _isSending = false;
         });
+        _scrollToNewResponse();
+
+        // ←←← ADD THIS LINE TO SAVE TO HISTORY
+        _sessionHistory.clear();
+        _sessionHistory.addAll(List.from(_messages));
       } else {
         throw Exception('API Error: ${response.statusCode}');
       }
     } catch (e) {
-      _removeLoadingMessageIfPresent();   // ← Important
+      print('API Error: $e');
       setState(() {
-        _messages.insert(0, _ChatMessage(
+        _removeLoadingMessageIfPresent();
+        _messages.add(_ChatMessage(
           isUser: false,
           text: '⚠️ Live API Error:\n$e\n\nPlease check your xAI key in config.dart',
         ));
+        _isSending = false;
       });
+      _scrollToNewResponse();            // ← Important: Scroll even on error
     }
   }
 
-      void _handleDelveDeeper() {
-    _removeLoadingMessageIfPresent(); // Clean any previous loading
+  void _handleDelveDeeper() {
+    _removeLoadingMessageIfPresent();
 
     setState(() {
-      _messages.add(_ChatMessage(isUser: false, text: '', isLoading: true)); // Show image
+      _messages.add(_ChatMessage(isUser: false, text: '', isLoading: true));
+      _isSending = true;
     });
     _scrollToNewResponse();
 
@@ -351,22 +362,14 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching."""
       orElse: () => _ChatMessage(isUser: true, text: "the current topic"),
     );
 
-    final delvePrompt = """Delve much deeper into: ${lastUserMessage.text}";Please provide a much deeper, richer Catholic exploration of this specific question. 
+    final delvePrompt = """Delve much deeper into: ${lastUserMessage.text}
+
+Please provide a much deeper, richer Catholic exploration of this specific question. 
 Expand with more Scripture, CCC references, saints, and practical applications.
 Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplications of the initial response unless providing significant expansion of the specific point.
 """;
 
-    if (_isMockMode) {
-      _removeLoadingMessageIfPresent();
-      setState(() {
-        _messages.add(_ChatMessage(isUser: false, text: _delveDeeperResponse));
-      });
-    } else {
-      _callLiveGrokAPI(delvePrompt);
-      return;
-    }
-
-    _scrollToNewResponse();
+    _callLiveGrokAPI(delvePrompt);   // Let the API method handle loading state
   }
 
   // Sidebar and other methods remain unchanged
@@ -386,9 +389,8 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
                 child: Text('Tools for the Journey', 
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ),
-              _sidebarTile(Icons.lightbulb_outline, "Seeking God's Wisdom", _showSeekingGodsWisdom),
+              _sidebarTile(Icons.balance, "Seeking God's Wisdom", _showSeekingGodsWisdom),
               _sidebarTile(Icons.card_giftcard, 'Using My Gifts for the Kingdom', _showUsingMyGifts),
-              _sidebarTile(Icons.balance, 'My Moral Dilemmas', _showMyMoralDilemmas),
               _sidebarTile(Icons.history, 'My History', _showMyHistory),
               _sidebarTile(Icons.people_outline, 'Walk Together', _showWalkTogether),
               _sidebarTile(Icons.policy_outlined, 'Terms & Privacy', _showTermsAndPrivacy),
@@ -456,42 +458,55 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
           return Row(
             children: [
               if (isWide) _buildSidebar(),
-              Expanded(
-                child: Column(
-                  children: [
-                    // Sticky User Question Area (always visible at top)
-                    if (_messages.isNotEmpty && _messages.any((m) => m.isUser))
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppColors.userBubble,
-                          border: Border(bottom: BorderSide(color: AppColors.primaryMaroon.withValues(alpha: 0.1))),
-                        ),
-                        child: SelectableText(
-                          _messages.firstWhere((m) => m.isUser).text,
-                          style: const TextStyle(fontSize: 16, height: 1.55, color: Colors.black87),
-                        ),
-                      ),
+            Expanded(
+                      child: Column(
+                        children: [
+                          // Sticky Latest Question Header
+                          if (_messages.any((m) => m.isUser))
+                            Builder(
+                              builder: (context) {
+                                final latestUserMessage = _messages.lastWhere(
+                                  (m) => m.isUser,
+                                  orElse: () => _ChatMessage(isUser: true, text: ''),
+                                );
+                                if (latestUserMessage.text.isNotEmpty) {
+                                  return Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.userBubble,
+                                      border: Border(bottom: BorderSide(color: AppColors.primaryMaroon.withValues(alpha: 0.1))),
+                                    ),
+                                    child: SelectableText(
+                                      latestUserMessage.text,
+                                      style: const TextStyle(fontSize: 16, height: 1.55, color: Colors.black87),
+                                    ),
+                                  );
+                                }
+                                return const SizedBox.shrink();
+                              },
+                            ),
 
-                    // Scrollable Response Area
-                    Expanded(
-                      child: _messages.isEmpty
+                          // Messages Area - REVERSED (newest at top)
+                          Expanded(
+                                                  child: _messages.isEmpty
                           ? _buildEmptyState()
                           : ListView.builder(
                               controller: _scrollController,
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              reverse: false,   // ← Change to false or remove the line
+                              padding: const EdgeInsets.all(16),
                               itemCount: _messages.length,
                               itemBuilder: (context, index) {
                                 final msg = _messages[index];
                                 return _buildMessageBubble(msg, index);
                               },
                             ),
-                    ),
+                          ),
 
-                    _buildInputBar(),
-                  ],
-                ),
-              ),
+                          // Input Bar
+                          _buildInputBar(),
+                        ],
+                      ),
+                    ),
             ],
           );
         },
@@ -703,6 +718,8 @@ class _ChatMessage {
   final bool isStructuredSample;
   final bool isLoading;
   final bool isSpiritualNourishment;
+  bool isShared;                    // ← Add this
+  DateTime? sharedAt;               // ← Add this (optional timestamp)
 
   _ChatMessage({
     required this.isUser,
@@ -710,6 +727,8 @@ class _ChatMessage {
     this.isStructuredSample = false,
     this.isLoading = false,
     this.isSpiritualNourishment = false,
+    this.isShared = false,          // default false
+    this.sharedAt,
   });
 }
 

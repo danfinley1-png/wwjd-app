@@ -1,4 +1,4 @@
-  // lib/walk_together_screen.dart
+// lib/walk_together_screen.dart
 import 'package:flutter/material.dart';
 
 class WalkTogetherScreen extends StatefulWidget {
@@ -11,7 +11,8 @@ class WalkTogetherScreen extends StatefulWidget {
 }
 
 class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
-  final List<Map<String, dynamic>> _sharedJourneys = [];
+  // Static list so shared journeys persist when returning to the screen
+  static final List<Map<String, dynamic>> _sharedJourneys = [];
 
   @override
   void initState() {
@@ -88,35 +89,30 @@ class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
     );
   }
 
-    void _openJourney(Map<String, dynamic> journey) {
+  void _openJourney(Map<String, dynamic> journey) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      useSafeArea: true,                    // Important for iPhone notch/status bar
+      useSafeArea: true,
       builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
+        initialChildSize: 0.85,
         minChildSize: 0.6,
         maxChildSize: 0.95,
         expand: true,
         builder: (context, scrollController) {
           return SingleChildScrollView(
             controller: scrollController,
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 40), // Extra bottom padding for iPhone
+            padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  journey['title'] ?? 'Shared Journey',
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 20),
-                const Text('Question:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const SizedBox(height: 8),
-                Text(journey['question'] ?? '', style: const TextStyle(fontSize: 16, height: 1.5)),
+                Text(journey['title'] ?? 'Shared Journey', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                const Text('Question:', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(journey['question'] ?? ''),
                 const SizedBox(height: 24),
-                const Text('WWJD Response:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const SizedBox(height: 8),
-                Text(journey['response'] ?? '', style: const TextStyle(fontSize: 16, height: 1.5)),
+                const Text('WWJD Response:', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(journey['response'] ?? ''),
                 const SizedBox(height: 40),
                 SizedBox(
                   width: double.infinity,
