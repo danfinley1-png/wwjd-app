@@ -112,13 +112,13 @@ Delve Deeper – Additional Light from the Church’s Treasury
     );
   }
 
-      void _shareToWalkTogether(_ChatMessage msg) {
-    // Find the user question that immediately precedes this AI response
+  void _shareToWalkTogether(_ChatMessage msg) {
+    // Find the correct user question for this specific response
     String userQuestion = "No specific question found";
     bool foundResponse = false;
 
     for (int i = _messages.length - 1; i >= 0; i--) {
-      if (_messages[i] == msg) {   // Found the current response
+      if (_messages[i] == msg) {
         foundResponse = true;
         continue;
       }
@@ -130,22 +130,13 @@ Delve Deeper – Additional Light from the Church’s Treasury
 
     String fullResponse = msg.text;
 
-    // Include Delve Deeper if present
-    for (int i = _messages.length - 1; i >= 0; i--) {
-      if (_messages[i].text.contains("Delve Deeper") && _messages[i].text != fullResponse) {
-        fullResponse += "\n\n--- Delve Deeper ---\n${_messages[i].text}";
-        break;
-      }
-    }
-
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Share to Walk Together'),
         content: const Text(
           'This will share an anonymized version of your question and the WWJD response.\n\n'
-          'Caution: Ensure no personal or confidential information is being shared.\n'
-          'Only anonymized content will be visible to others.',
+          'Caution: Ensure no personal or confidential information is being shared.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -226,17 +217,23 @@ Delve Deeper – Additional Light from the Church’s Treasury
   }
 
   void _scrollToLoading() {
-    Future.delayed(const Duration(milliseconds: 50), () {
+    Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
-        _scrollController.jumpTo(0.0);
+        final max = _scrollController.position.maxScrollExtent;
+        _scrollController.jumpTo(max - 100);   // Loading image above the very bottom
       }
     });
   }
 
   void _scrollToNewResponse() {
-    Future.delayed(const Duration(milliseconds: 200), () {
+    Future.delayed(const Duration(milliseconds: 300), () {
       if (_scrollController.hasClients) {
-        _scrollController.jumpTo(0.0);   // Force to the very top of the page
+        final max = _scrollController.position.maxScrollExtent;
+        _scrollController.animateTo(
+          max,   // Absolute bottom for new response
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeOutCubic,
+        );
       }
     });
   }
@@ -255,7 +252,10 @@ Delve Deeper – Additional Light from the Church’s Treasury
       _isSending = true;
     });
     _controller.clear();
-    _scrollToLoading();                    // Ensure loading image is visible
+        _controller.clear();
+    print("DEBUG: Scrolling to loading for question: $text");
+    _scrollToLoading();
+    _scrollToNewResponse();   // Scroll to bottom so loading image is visible
 
     try {
       if (_isMockMode) {
@@ -278,6 +278,7 @@ Delve Deeper – Additional Light from the Church’s Treasury
   Future<void> _callLiveGrokAPI(String userMessage) async {
     final now = DateTime.now();
     final greeting = now.hour < 12 ? "Good morning" : now.hour < 17 ? "Good afternoon" : "Good evening";
+    _scrollToLoading();   // Match Delve Deeper: scroll to loading image at top
 
     try {
       final response = await http.post(
@@ -321,7 +322,7 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching."""
         final data = jsonDecode(response.body);
         final String liveResponse = data['choices'][0]['message']['content'] ?? 'No response received.';
 
-        setState(() {
+      setState(() {
           _removeLoadingMessageIfPresent();
           _messages.add(_ChatMessage(isUser: false, text: liveResponse));
           _isSending = false;
@@ -344,7 +345,11 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching."""
         ));
         _isSending = false;
       });
-      _scrollToNewResponse();            // ← Important: Scroll even on error
+      _scrollToNewResponse();
+
+      // ←←← ADD THIS LINE TO SAVE TO HISTORY (even on error)
+      _sessionHistory.clear();
+      _sessionHistory.addAll(List.from(_messages));
     }
   }
 
@@ -355,7 +360,7 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching."""
       _messages.add(_ChatMessage(isUser: false, text: '', isLoading: true));
       _isSending = true;
     });
-    _scrollToNewResponse();
+    _scrollToNewResponse();   // Scroll to bottom so loading image is visible
 
     final lastUserMessage = _messages.lastWhere(
       (m) => m.isUser,
@@ -369,7 +374,7 @@ Expand with more Scripture, CCC references, saints, and practical applications.
 Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplications of the initial response unless providing significant expansion of the specific point.
 """;
 
-    _callLiveGrokAPI(delvePrompt);   // Let the API method handle loading state
+    _callLiveGrokAPI(delvePrompt);
   }
 
   // Sidebar and other methods remain unchanged
@@ -458,10 +463,10 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
           return Row(
             children: [
               if (isWide) _buildSidebar(),
-            Expanded(
+      Expanded(
                       child: Column(
                         children: [
-                          // Sticky Latest Question Header
+                          // Sticky Latest Question
                           if (_messages.any((m) => m.isUser))
                             Builder(
                               builder: (context) {
@@ -486,13 +491,13 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
                               },
                             ),
 
-                          // Messages Area - REVERSED (newest at top)
+                          // Reversed ListView - Newest at top
                           Expanded(
-                                                  child: _messages.isEmpty
+                          child: _messages.isEmpty
                           ? _buildEmptyState()
                           : ListView.builder(
                               controller: _scrollController,
-                              reverse: false,   // ← Change to false or remove the line
+                              reverse: false,   // Standard chat: newest at bottom
                               padding: const EdgeInsets.all(16),
                               itemCount: _messages.length,
                               itemBuilder: (context, index) {
@@ -502,7 +507,6 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
                             ),
                           ),
 
-                          // Input Bar
                           _buildInputBar(),
                         ],
                       ),

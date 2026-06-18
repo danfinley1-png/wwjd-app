@@ -41,14 +41,14 @@ class _MyHistoryScreenState extends State<MyHistoryScreen> {
                     itemCount: widget.savedMessages.length,
                     itemBuilder: (context, index) {
                       final msg = widget.savedMessages[index] as dynamic;
-                      if (msg.text.contains("Welcome to Seeking God's Wisdom")) {
-                        return const SizedBox.shrink(); // Skip welcome
+                      final text = msg.text ?? '';
+
+                      // Skip welcome message
+                      if (text.contains("Welcome to Seeking God's Wisdom")) {
+                        return const SizedBox.shrink();
                       }
 
                       final isUser = msg.isUser ?? false;
-                      final text = msg.text ?? '';
-
-                      // Preview for compact view
                       final preview = text.length > 100 
                           ? text.substring(0, 100) + '...' 
                           : text;
@@ -57,7 +57,7 @@ class _MyHistoryScreenState extends State<MyHistoryScreen> {
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         child: ExpansionTile(
                           title: Text(
-                            isUser ? "Question" : "WWJD Response",
+                            isUser ? "My Question" : "WWJD Wisdom Sharing",
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           subtitle: Text(preview),

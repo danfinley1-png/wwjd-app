@@ -14,11 +14,18 @@ class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
   // Static list so shared journeys persist when returning to the screen
   static final List<Map<String, dynamic>> _sharedJourneys = [];
 
-  @override
+@override
   void initState() {
     super.initState();
     if (widget.sharedJourney != null) {
-      _sharedJourneys.add(widget.sharedJourney!);
+      // Prevent duplicate postings
+      final newJourney = widget.sharedJourney!;
+      bool alreadyShared = _sharedJourneys.any((j) => 
+        j['question'] == newJourney['question'] && j['response'] == newJourney['response']
+      );
+      if (!alreadyShared) {
+        _sharedJourneys.add(newJourney);
+      }
     }
   }
 

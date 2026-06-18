@@ -1,0 +1,9 @@
+Backups
+
+PS C:\users\danfi\wwjd_app> git log --oneline -5
+d9e3ab9 (HEAD -> feature/walk-together) Checkpoint: My History + Walk Together minimally working, session history preserved (June 17)
+d927e2c Working Walk Together + sharing + basic scroll fix (June 10)
+ab8e5f3 feat: fully implement Spiritual Nourishment section with topic-specific rich content
+770212d Stable working version - April 2026: Live API, Spiritual Nourishment, sidebar navigation
+cd7b9be Stable version: Sidebar + Spiritual Nourishment widget integrated, Live API working
+PS C:\users\danfi\wwjd_app>
