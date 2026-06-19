@@ -10,6 +10,13 @@ import '../widgets/spiritual_nourishment_section.dart';
 import '../core/app_colors.dart';
 import '../walk_together_screen.dart';
 import '../my_history_screen.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'dart:html' as html; // experimental approach
+import 'dart:io' show Platform;   // For native
+import 'package:flutter/foundation.dart' show kIsWeb;   // For web
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -26,10 +33,14 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<Map<String, dynamic>> _sharedJourneys = [];
   static final List<_ChatMessage> _sessionHistory = [];
   final GlobalKey _latestMessageKey = GlobalKey();
-
+  final SpeechToText speech = SpeechToText();
+  final FlutterTts flutterTts = FlutterTts();
+  bool _isListening = false;
   bool _isMockMode = false;
   bool _isSending = false;
-
+  bool isMobile = !kIsWeb && (Platform.isIOS || Platform.isAndroid);
+  bool isWeb = kIsWeb;
+  bool isIOS = !kIsWeb && Platform.isIOS;
   String? _selectedSpiritualTopic;
 
   static const double kDesktopBreakpoint = 900.0;
@@ -242,6 +253,59 @@ Delve Deeper – Additional Light from the Church’s Treasury
     _messages.removeWhere((m) => m.isLoading);
   }
 
+  void _toggleListening() async {
+    if (isWeb) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Voice input available on iPhone app')),
+      );
+      return;
+    }
+
+    if (_isListening) {
+      await speech.stop();
+      setState(() => _isListening = false);
+      print("DEBUG: Stopped listening");
+    } else {
+      bool available = await speech.initialize(
+        onStatus: (status) => print("DEBUG: Speech status: $status"),
+      );
+      print("DEBUG: Speech available: $available");
+      if (available) {
+        setState(() => _isListening = true);
+        speech.listen(
+          onResult: (result) {
+            print("DEBUG: Recognized: ${result.recognizedWords}");
+            setState(() {
+              _controller.text = result.recognizedWords;
+            });
+          },
+          localeId: "en_US",
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Speech recognition not available')),
+        );
+      }
+    }
+  }
+  
+  void _speak(String text) async {
+    // Remove URLs and links
+    String cleanText = text.replaceAll(RegExp(r'http[s]?://[^\s]+'), '');
+    cleanText = cleanText.replaceAll(RegExp(r'\[.*?\]\(.*?\)'), '');   // Remove Markdown links
+
+    await flutterTts.setLanguage("en-US");
+    await flutterTts.setPitch(0.75);     // Deeper pitch
+    await flutterTts.setSpeechRate(0.8);   // Slower for natural sound
+    await flutterTts.setVolume(1.0);
+    
+    // Try deep male voices
+    await flutterTts.setVoice({"name": "Daniel", "locale": "en-US"});   // Deep option
+    // Or try "Tom", "Fred", "Alex"
+
+    await flutterTts.speak(cleanText);
+  }
+
   Future<void> _handleSend() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _isSending) return;
@@ -309,6 +373,10 @@ Core Structure to follow naturally:
 - Kingdom Challenge
 - Deeper Catholic Roots (Catechism, saints, etc.) + gentle closing
 
+**When referencing Scripture, CCC, saints, or documents, use accurate, direct URLs in Markdown format [Text](url) that point to the specific paragraph or section, not the home page. 
+Prefer Vatican.va or USCCB.org links with the exact reference.**
+
+
 Stay reverent, encouraging, and fully aligned with Catholic teaching."""
             },
             {"role": "user", "content": userMessage}
@@ -371,7 +439,9 @@ Stay reverent, encouraging, and fully aligned with Catholic teaching."""
 
 Please provide a much deeper, richer Catholic exploration of this specific question. 
 Expand with more Scripture, CCC references, saints, and practical applications.
-Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplications of the initial response unless providing significant expansion of the specific point.
+State areas being expanded upon and make the response flow as an extension of the original response. Be warm and pastoral. 
+Avoid duplications of the initial response unless providing significant expansion of the specific point. 
+Use hyperlinks to recommend additional resources where appropriate.
 """;
 
     _callLiveGrokAPI(delvePrompt);
@@ -605,7 +675,25 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
             else if (msg.isSpiritualNourishment)
               SpiritualNourishmentSection(initialTopic: _selectedSpiritualTopic)
             else
-              SelectableText(msg.text, style: const TextStyle(fontSize: 16, height: 1.55)),
+              MarkdownBody(
+              data: msg.text,
+              styleSheet: MarkdownStyleSheet(
+                p: const TextStyle(fontSize: 16, height: 1.55),
+                a: const TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
+              ),
+              onTapLink: (text, url, title) async {
+                if (url != null) {
+                  final Uri uri = Uri.parse(url);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Could not open link: $url')),
+                    );
+                  }
+                }
+              },
+            ),
 
             // Action buttons for AI responses only
             if (!isUser && !msg.isLoading && !msg.isSpiritualNourishment && !msg.isStructuredSample) ...[
@@ -627,6 +715,10 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
                   IconButton(
                     icon: const Icon(Icons.share, size: 19),
                     onPressed: () => _shareMessage(msg.text),
+                  ),
+                                    IconButton(
+                    icon: const Icon(Icons.volume_up, size: 19),
+                    onPressed: () => _speak(msg.text),
                   ),
                   TextButton.icon(
                     icon: const Icon(Icons.share_outlined, size: 18),
@@ -652,6 +744,10 @@ Maintain the exact 7-part WWJD structure. Be warm and pastoral. Avoid duplicatio
       ),
       child: Row(
         children: [
+          IconButton(
+            icon: Icon(_isListening ? Icons.mic_off : Icons.mic),
+            onPressed: _toggleListening,
+          ),
           Expanded(
             child: TextField(
               controller: _controller,

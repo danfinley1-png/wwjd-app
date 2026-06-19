@@ -1,5 +1,0 @@
-2026/06/18-18:31:02.999 d8c Creating DB C:\Users\danfi\AppData\Local\Temp\flutter_tools.f4996576\flutter_tools_chrome_device.ee95c379\Default\Sync Data\LevelDB since it was missing.
-2026/06/18-18:31:03.017 d8c Reusing MANIFEST C:\Users\danfi\AppData\Local\Temp\flutter_tools.f4996576\flutter_tools_chrome_device.ee95c379\Default\Sync Data\LevelDB/MANIFEST-000001
-2026/06/18-18:31:08.575 4fd8 Level-0 table #5: started
-2026/06/18-18:31:08.579 4fd8 Level-0 table #5: 222680 bytes OK
-2026/06/18-18:31:08.581 4fd8 Delete type=0 #3
