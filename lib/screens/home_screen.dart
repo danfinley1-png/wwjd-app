@@ -4,6 +4,10 @@ import 'package:share_plus/share_plus.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'sharing_my_gifts_screen.dart';
+import 'package:uuid/uuid.dart';
+import 'activity_detail_screen.dart';
+import '../models/gift_activity.dart';
 
 import '../core/config.dart';
 import '../widgets/spiritual_nourishment_section.dart';
@@ -35,6 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey _latestMessageKey = GlobalKey();
   final SpeechToText speech = SpeechToText();
   final FlutterTts flutterTts = FlutterTts();
+  List<Map<String, String>> _lastExtractedActions = [];
+  
   bool _isListening = false;
   bool _isMockMode = false;
   bool _isSending = false;
@@ -88,19 +94,110 @@ Delve Deeper – Additional Light from the Church’s Treasury
     _scrollToTop();
   }
 
-  void _showUsingMyGifts() {
-    setState(() {
-      _messages.clear();
-      _messages.add(_ChatMessage(
-        isUser: false,
-        text: "**Using My Gifts for the Kingdom**\n\n"
-            "Every baptized Catholic has received unique gifts from the Holy Spirit for the building up of the Church and the glory of God.\n\n"
-            "Discovering and using your gifts is one of the most fulfilling parts of the Christian life.",
-      ));
-    });
-    _scrollToTop();
+  void _showSharingMyGifts() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SharingMyGiftsScreen(),   // Remove const
+      ),
+    );
   }
 
+  void _addToGiftsPlan(_ChatMessage msg) {
+    final actions = _lastExtractedActions.isNotEmpty 
+        ? _lastExtractedActions 
+        : _extractSuggestedActions(msg.text);
+
+    if (actions.isEmpty) {
+      _createSingleActivity(msg.text);
+      return;
+    }
+
+    // Multi-action dialog
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add to My Gifts Plan'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 420,
+          child: ListView.builder(
+            itemCount: actions.length,
+            itemBuilder: (context, index) {
+              final action = actions[index];
+              return CheckboxListTile(
+                title: Text(action['title'] ?? 'Action'),
+                subtitle: Text(action['description'] ?? ''),
+                value: true,
+                onChanged: (val) {},
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              for (var action in actions) {
+                _createActivityFromMap(action);
+              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Actions added to Sharing My Gifts')),
+              );
+            },
+            child: const Text('Add All'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _createActivityFromMap(Map<String, String> action) {
+    final activity = GiftActivity(
+      id: const Uuid().v4(),
+      title: action['title'] ?? 'WWJD Action',
+      description: action['description'] ?? '',
+      linkedQuestionId: 'current',
+      frequency: action['frequency'] ?? 'Daily',
+      hasReminder: true,
+    );
+
+    globalGiftActivities.add(activity);
+  }
+
+  void _createSingleActivity(String responseText) {
+    // fallback for non-structured responses
+    final activity = GiftActivity(
+      id: const Uuid().v4(),
+      title: 'WWJD Action Step',
+      description: responseText.length > 280 ? responseText.substring(0, 280) + '...' : responseText,
+      linkedQuestionId: 'current',
+      frequency: 'Daily',
+      hasReminder: true,
+    );
+
+    globalGiftActivities.add(activity);
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ActivityDetailScreen(
+          activity: activity,
+          onUpdate: (updated) {
+            final index = globalGiftActivities.indexWhere((a) => a.id == updated.id);
+            if (index != -1) {
+              globalGiftActivities[index] = updated;
+            }
+          },
+        ),
+      ),
+    );
+  }
+    
   void _showMyMoralDilemmas() {
     setState(() {
       _messages.clear();
@@ -255,10 +352,18 @@ Delve Deeper – Additional Light from the Church’s Treasury
 
   void _toggleListening() async {
     if (isWeb) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Voice input available on iPhone app')),
-      );
-      return;
+      // Check for iOS PWA
+      final isIOSPWA = html.window.navigator.userAgent.contains("iPhone") || 
+                       html.window.navigator.userAgent.contains("iPad");
+      if (isIOSPWA) {
+        // Enable speech for iOS PWA
+        // (add the iOS code here or call the native speech)
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Voice input available on iPhone app')),
+        );
+        return;
+      }
     }
 
     if (_isListening) {
@@ -340,29 +445,44 @@ Delve Deeper – Additional Light from the Church’s Treasury
   }
 
   Future<void> _callLiveGrokAPI(String userMessage) async {
-    final now = DateTime.now();
-    final greeting = now.hour < 12 ? "Good morning" : now.hour < 17 ? "Good afternoon" : "Good evening";
-    _scrollToLoading();   // Match Delve Deeper: scroll to loading image at top
+  final now = DateTime.now();
+  final greeting = now.hour < 12 ? "Good morning" : now.hour < 17 ? "Good afternoon" : "Good evening";
+  _scrollToLoading();
 
-    try {
-      final response = await http.post(
-        Uri.parse('https://api.x.ai/v1/chat/completions'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${AppConfig.xaiApiKey}',
-        },
-        body: jsonEncode({
-          "model": "grok-3",
-          "messages": [
-            {
-              "role": "system",
-              "content": """You are WWJD, a warm, faithful Catholic spiritual advisor.
+  try {
+    final response = await http.post(
+      Uri.parse('https://api.x.ai/v1/chat/completions'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${AppConfig.xaiApiKey}',
+      },
+      body: jsonEncode({
+        "model": "grok-3",
+        "messages": [
+          {
+            "role": "system",
+            "content": """You are WWJD, a warm, faithful Catholic spiritual advisor.
+
+**CRITICAL LINK RULE — NON-NEGOTIABLE:**
+Only use these stable, official sources with direct paragraph links.
+Only use these exact, verified formats:
+- CCC: Use the exact paragraph link, e.g. https://www.vatican.va/content/catechism/en/part_three/section_two/chapter_two/article_7/ii_respect_for_persons_and_their_goods.html for CCC 2290
+- Bible: https://www.biblegateway.com/passage/?search=1%20Corinthians%206%3A9-10&version=NABRE
+- USCCB.org when appropriate
+If you are not 100% sure of the exact paragraph number and link, do not link — just reference the teaching by number (e.g. "as taught in CCC 2290").
+Never link to home pages or sites with known 404/certificate issues. 
+Always link to the exact paragraph or section.
+Never invent or guess links.
+
+**Bible Links:**
+- Use BibleGateway.com with this exact format: https://www.biblegateway.com/passage/?search=1%20Corinthians%206%3A9-10&version=NABRE
+- Always use proper URL encoding (%20 for space, %3A for colon).
+- Prefer NABRE or RSVCE versions.
 
 Current time: $greeting on ${DateFormat('EEEE').format(now)}.
 
 Respond in a natural, flowing style **without any numbering** (no 1., 2., 3., etc.). 
 Let each section transition smoothly as paragraphs and directly reference the user's specific situation.
-Do not use the language that makes the application respond as a person.
 
 Core Structure to follow naturally:
 - Warm, personal welcome
@@ -373,79 +493,178 @@ Core Structure to follow naturally:
 - Kingdom Challenge
 - Deeper Catholic Roots (Catechism, saints, etc.) + gentle closing
 
-**When referencing Scripture, CCC, saints, or documents, use accurate, direct URLs in Markdown format [Text](url) that point to the specific paragraph or section, not the home page. 
-Prefer Vatican.va or USCCB.org links with the exact reference.**
+**When referencing Scripture, CCC, saints, or documents, use accurate, current official URLs in Markdown format [Text](url) that point to the specific paragraph or section.**
 
+**CRITICAL FORMATTING RULE — NON-NEGOTIABLE:**
+After your final paragraph, output **ONLY** a valid JSON block wrapped in ```json ... ```. 
+Nothing else after the JSON block.
 
-Stay reverent, encouraging, and fully aligned with Catholic teaching."""
-            },
-            {"role": "user", "content": userMessage}
-          ],
-          "temperature": 0.78,
-          "max_tokens": 1200,
-        }),
-      );
+The JSON must contain 2–3 concrete, distinct, actionable challenges suitable for "Sharing My Gifts".
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final String liveResponse = data['choices'][0]['message']['content'] ?? 'No response received.';
+**FINAL OUTPUT RULE (MUST FOLLOW):**
+Always end your response with EXACTLY this and NOTHING after it:
 
-      setState(() {
-          _removeLoadingMessageIfPresent();
-          _messages.add(_ChatMessage(isUser: false, text: liveResponse));
-          _isSending = false;
-        });
-        _scrollToNewResponse();
+```json
+{
+  "suggestedActions": [
+    {
+      "title": "Title 1",
+      "description": "Actionable sentence",
+      "frequency": "Daily"
+    },
+    {
+      "title": "Title 2",
+      "description": "Actionable sentence",
+      "frequency": "Weekly"
+    }
+  ]
+}
+Absolute Rule: End your response with nothing but this exact JSON block wrapped in code fences. 
+Do not add any text after it.""",
+},
+{"role": "user", "content": userMessage}
+],
+"temperature": 0.78,
+"max_tokens": 1200,
+}),
+);
+if (response.statusCode == 200) {
+final data = jsonDecode(response.body);
+final String rawResponse = data['choices'][0]['message']['content'] ?? 'No response received.';
+final (cleanText, actions) = _processApiResponse(rawResponse);
+_lastExtractedActions = actions;
+setState(() {
+_removeLoadingMessageIfPresent();
+_messages.add(_ChatMessage(isUser: false, text: cleanText));
+_isSending = false;
+});
+_scrollToNewResponse();
+_sessionHistory.clear();
+_sessionHistory.addAll(List.from(_messages));
+} else {
+throw Exception('API Error: ${response.statusCode}');
+}
+} catch (e) {
+print('API Error: $e');
+setState(() {
+_removeLoadingMessageIfPresent();
+_messages.add(_ChatMessage(
+isUser: false,
+text: '⚠️ Live API Error:\n$e\n\nPlease check your xAI key in config.dart',
+));
+_isSending = false;
+});
+_scrollToNewResponse();
+_sessionHistory.clear();
+_sessionHistory.addAll(List.from(_messages));
+}
+}
+void _handleDelveDeeper() {
+_removeLoadingMessageIfPresent();
+setState(() {
+_messages.add(_ChatMessage(isUser: false, text: '', isLoading: true));
+_isSending = true;
+});
+_scrollToNewResponse();
+final lastUserMessage = _messages.lastWhere(
+(m) => m.isUser,
+orElse: () => _ChatMessage(isUser: true, text: "the current topic"),
+);
+final delvePrompt = """${lastUserMessage.text}
+DELVE DEEPER MODE
+Provide a much deeper Catholic exploration of the above topic. Expand with Scripture (BibleGateway links), CCC (Vatican.va links), saints, and practical applications. Be warm and pastoral.
+NON-NEGOTIABLE FORMATTING:
 
-        // ←←← ADD THIS LINE TO SAVE TO HISTORY
-        _sessionHistory.clear();
-        _sessionHistory.addAll(List.from(_messages));
-      } else {
-        throw Exception('API Error: ${response.statusCode}');
+Write your full, rich response first as normal paragraphs.
+After the very last sentence of your response, output EXACTLY this and nothing else:
+
+{
+  "suggestedActions": [
+    {
+      "title": "Short clear title 1",
+      "description": "One clear actionable sentence",
+      "frequency": "Daily"
+    },
+    {
+      "title": "Short clear title 2",
+      "description": "One clear actionable sentence",
+      "frequency": "Weekly"
+    }
+  ]
+}
+```""";
+
+  _lastExtractedActions = [];
+  _callLiveGrokAPI(delvePrompt);
+}
+
+// ====================== HELPER METHODS ======================
+
+(String cleanText, List<Map<String, String>> actions) _processApiResponse(String fullResponse) {
+  List<Map<String, String>> actions = [];
+
+  // Strong JSON extraction
+  final jsonMatch = RegExp(r'```json\s*(\{[\s\S]*?\})\s*```', dotAll: true).firstMatch(fullResponse) ??
+                    RegExp(r'(\{[\s\S]*?"suggestedActions"[\s\S]*?\})', dotAll: true).firstMatch(fullResponse);
+
+  if (jsonMatch != null) {
+    try {
+      String jsonStr = jsonMatch.group(1)!;
+      jsonStr = jsonStr.replaceAll(RegExp(r'\s+'), ' ').trim();
+      final data = json.decode(jsonStr);
+      final list = data['suggestedActions'] as List?;
+      if (list != null && list.isNotEmpty) {
+        actions = list.map((e) => Map<String, String>.from(e)).toList();
       }
     } catch (e) {
-      print('API Error: $e');
-      setState(() {
-        _removeLoadingMessageIfPresent();
-        _messages.add(_ChatMessage(
-          isUser: false,
-          text: '⚠️ Live API Error:\n$e\n\nPlease check your xAI key in config.dart',
-        ));
-        _isSending = false;
-      });
-      _scrollToNewResponse();
-
-      // ←←← ADD THIS LINE TO SAVE TO HISTORY (even on error)
-      _sessionHistory.clear();
-      _sessionHistory.addAll(List.from(_messages));
+      print('JSON parse error: $e');
     }
   }
 
-  void _handleDelveDeeper() {
-    _removeLoadingMessageIfPresent();
+  // Safer fallback action extraction
+  if (actions.isEmpty) {
+    final actionMatches = RegExp(
+      r'(Begin|Try|Consider|Set aside|Reach out|Join|Practice|Commit to|Daily Prayer|Weekly)[^.]{15,140}\.',
+      caseSensitive: false,
+    ).allMatches(fullResponse);
 
-    setState(() {
-      _messages.add(_ChatMessage(isUser: false, text: '', isLoading: true));
-      _isSending = true;
-    });
-    _scrollToNewResponse();   // Scroll to bottom so loading image is visible
-
-    final lastUserMessage = _messages.lastWhere(
-      (m) => m.isUser,
-      orElse: () => _ChatMessage(isUser: true, text: "the current topic"),
-    );
-
-    final delvePrompt = """Delve much deeper into: ${lastUserMessage.text}
-
-Please provide a much deeper, richer Catholic exploration of this specific question. 
-Expand with more Scripture, CCC references, saints, and practical applications.
-State areas being expanded upon and make the response flow as an extension of the original response. Be warm and pastoral. 
-Avoid duplications of the initial response unless providing significant expansion of the specific point. 
-Use hyperlinks to recommend additional resources where appropriate.
-""";
-
-    _callLiveGrokAPI(delvePrompt);
+    actions = actionMatches.take(3).map((m) {
+      final text = m.group(0)!.trim();
+      return {
+        "title": text.length > 60 ? text.substring(0, 57) + "..." : text,
+        "description": text,
+        "frequency": "Daily"
+      };
+    }).toList();
   }
+
+  // Clean visible text (remove JSON)
+  String cleanText = fullResponse;
+  final jsonStart = cleanText.indexOf('```json');
+  if (jsonStart != -1) {
+    cleanText = cleanText.substring(0, jsonStart).trim();
+  } else {
+    cleanText = cleanText.replaceAll(RegExp(r'\{[\s\S]*?"suggestedActions"[\s\S]*?\}'), '').trim();
+  }
+
+  return (cleanText, actions);
+}
+
+List<Map<String, String>> _extractSuggestedActions(String text) {
+  try {
+    final jsonMatch = RegExp(r'```json\s*(\{[\s\S]*?\})\s*```', dotAll: true).firstMatch(text) ??
+                      RegExp(r'(\{[\s\S]*?"suggestedActions"[\s\S]*?\})', dotAll: true).firstMatch(text);
+    if (jsonMatch != null) {
+      final jsonStr = jsonMatch.group(1)!;
+      final data = json.decode(jsonStr);
+      final list = data['suggestedActions'] as List?;
+      return list?.map((e) => Map<String, String>.from(e)).toList() ?? [];
+    }
+  } catch (e) {
+    print('JSON parse error: $e');
+  }
+  return [];
+}
 
   // Sidebar and other methods remain unchanged
   Widget _buildSidebar({bool isInDrawer = false}) {
@@ -465,7 +684,7 @@ Use hyperlinks to recommend additional resources where appropriate.
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ),
               _sidebarTile(Icons.balance, "Seeking God's Wisdom", _showSeekingGodsWisdom),
-              _sidebarTile(Icons.card_giftcard, 'Using My Gifts for the Kingdom', _showUsingMyGifts),
+              _sidebarTile(Icons.card_giftcard, 'Sharing My Gifts', _showSharingMyGifts),
               _sidebarTile(Icons.history, 'My History', _showMyHistory),
               _sidebarTile(Icons.people_outline, 'Walk Together', _showWalkTogether),
               _sidebarTile(Icons.policy_outlined, 'Terms & Privacy', _showTermsAndPrivacy),
@@ -724,6 +943,12 @@ Use hyperlinks to recommend additional resources where appropriate.
                     icon: const Icon(Icons.share_outlined, size: 18),
                     label: const Text('Share Anonymously'),
                     onPressed: () => _shareToWalkTogether(msg),
+                    style: TextButton.styleFrom(foregroundColor: AppColors.primaryMaroon),                
+                  ),
+                  TextButton.icon(
+                    icon: const Icon(Icons.card_giftcard, size: 18),
+                    label: const Text('Add to My Gifts Plan'),
+                    onPressed: () => _addToGiftsPlan(msg),
                     style: TextButton.styleFrom(foregroundColor: AppColors.primaryMaroon),
                   ),
                 ],
@@ -787,8 +1012,8 @@ Use hyperlinks to recommend additional resources where appropriate.
         children: [
           Image.asset(
             'assets/images/wwjd_header.jpg',
-            height: 52,
-            width: 52,
+            height: MediaQuery.of(context).size.height * 0.12,
+            width: MediaQuery.of(context).size.height * 0.12,
             fit: BoxFit.cover,
           ),
           const SizedBox(height: 16),

@@ -108,3 +108,20 @@ I can prepare the full main.dart for you instantly whenever you want changes
 
 Would you like me to give you the current full working main.dart right now (with highlighted API key placeholder) so you can start making improvements immediately?
 Just say “Give me the latest main.dart” and I’ll provide the complete file.
+
+
+Backup June 9
+cd C:\users\danfi\wwjd_app
+
+git checkout feature/walk-together
+git reset --hard ab8e5f3
+flutter clean
+flutter pub get
+flutter run -d edge
+
+To build iPhone access
+cd C:\users\danfi\wwjd_app
+flutter build web
+
+cd C:\users\danfi\wwjd_app\build\web
+npx serve -p 8080
