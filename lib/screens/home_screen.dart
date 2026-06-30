@@ -8,6 +8,8 @@ import 'sharing_my_gifts_screen.dart';
 import 'package:uuid/uuid.dart';
 import 'activity_detail_screen.dart';
 import '../models/gift_activity.dart';
+import '../core/auth/login_screen.dart';
+import '../core/database/decision_repository.dart';
 
 import '../core/config.dart';
 import '../widgets/spiritual_nourishment_section.dart';
@@ -79,6 +81,27 @@ Delve Deeper – Additional Light from the Church’s Treasury
     _scrollToTop();
   }
 
+    void _showAuthDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sign In to Save Progress'),
+        content: const Text('Sign in or register to save your chat history and Gifts Plan.\n\nGuests can still use the chat freely.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Continue as Guest')),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // TODO: Open login screen (add import first)
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login screen coming soon')));
+            },
+            child: const Text('Sign In / Register'),
+          ),
+        ],
+      ),
+    );
+  }
+  
   void _showSeekingGodsWisdom() {
     print("DEBUG: Returning to Seeking God's Wisdom. History size: ${_sessionHistory.length}");
     setState(() {
@@ -529,36 +552,43 @@ Do not add any text after it.""",
 }),
 );
 if (response.statusCode == 200) {
-final data = jsonDecode(response.body);
-final String rawResponse = data['choices'][0]['message']['content'] ?? 'No response received.';
-final (cleanText, actions) = _processApiResponse(rawResponse);
-_lastExtractedActions = actions;
-setState(() {
-_removeLoadingMessageIfPresent();
-_messages.add(_ChatMessage(isUser: false, text: cleanText));
-_isSending = false;
-});
-_scrollToNewResponse();
-_sessionHistory.clear();
-_sessionHistory.addAll(List.from(_messages));
-} else {
-throw Exception('API Error: ${response.statusCode}');
-}
-} catch (e) {
-print('API Error: $e');
-setState(() {
-_removeLoadingMessageIfPresent();
-_messages.add(_ChatMessage(
-isUser: false,
-text: '⚠️ Live API Error:\n$e\n\nPlease check your xAI key in config.dart',
-));
-_isSending = false;
-});
-_scrollToNewResponse();
-_sessionHistory.clear();
-_sessionHistory.addAll(List.from(_messages));
-}
-}
+        final data = jsonDecode(response.body);
+        final String rawResponse = data['choices'][0]['message']['content'] ?? 'No response received.';
+        final (cleanText, actions) = _processApiResponse(rawResponse);
+        _lastExtractedActions = actions;
+
+        setState(() {
+          _removeLoadingMessageIfPresent();
+          _messages.add(_ChatMessage(isUser: false, text: cleanText));
+          _isSending = false;
+        });
+
+        // NEW: Save to Firestore
+        final repo = DecisionRepository();
+        repo.saveDecision(userMessage, cleanText);
+
+        _scrollToNewResponse();
+        _sessionHistory.clear();
+        _sessionHistory.addAll(List.from(_messages));
+      } else {
+        throw Exception('API Error: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('API Error: $e');
+      setState(() {
+        _removeLoadingMessageIfPresent();
+        _messages.add(_ChatMessage(
+          isUser: false,
+          text: '⚠️ Live API Error:\n$e\n\nPlease check your xAI key in config.dart',
+        ));
+        _isSending = false;
+      });
+      _scrollToNewResponse();
+      _sessionHistory.clear();
+      _sessionHistory.addAll(List.from(_messages));
+    }
+  }
+
 void _handleDelveDeeper() {
 _removeLoadingMessageIfPresent();
 setState(() {
@@ -611,17 +641,20 @@ After the very last sentence of your response, output EXACTLY this and nothing e
     try {
       String jsonStr = jsonMatch.group(1)!;
       jsonStr = jsonStr.replaceAll(RegExp(r'\s+'), ' ').trim();
+      
       final data = json.decode(jsonStr);
-      final list = data['suggestedActions'] as List?;
-      if (list != null && list.isNotEmpty) {
-        actions = list.map((e) => Map<String, String>.from(e)).toList();
+      
+      if (data is Map && data['suggestedActions'] is List) {
+        actions = (data['suggestedActions'] as List)
+            .map((e) => Map<String, String>.from(e as Map))
+            .toList();
       }
     } catch (e) {
       print('JSON parse error: $e');
     }
   }
 
-  // Safer fallback action extraction
+  // Fallback if no actions found
   if (actions.isEmpty) {
     final actionMatches = RegExp(
       r'(Begin|Try|Consider|Set aside|Reach out|Join|Practice|Commit to|Daily Prayer|Weekly)[^.]{15,140}\.',
@@ -638,7 +671,7 @@ After the very last sentence of your response, output EXACTLY this and nothing e
     }).toList();
   }
 
-  // Clean visible text (remove JSON)
+  // Clean visible text
   String cleanText = fullResponse;
   final jsonStart = cleanText.indexOf('```json');
   if (jsonStart != -1) {
@@ -970,8 +1003,12 @@ List<Map<String, String>> _extractSuggestedActions(String text) {
       child: Row(
         children: [
           IconButton(
-            icon: Icon(_isListening ? Icons.mic_off : Icons.mic),
-            onPressed: _toggleListening,
+            icon: const Icon(Icons.account_circle),
+            onPressed: () {
+            Navigator.pop(context); // if from dialog
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+            },
+            tooltip: 'Sign In / Register',
           ),
           Expanded(
             child: TextField(

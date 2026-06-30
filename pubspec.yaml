@@ -20,6 +20,7 @@ dependencies:
   url_launcher: ^6.3.0 
   speech_to_text: ^6.6.0
   flutter_tts: ^4.0.2
+  google_sign_in: ^6.2.1
 
 
 dev_dependencies:
