@@ -11,14 +11,22 @@ class WalkTogetherScreen extends StatefulWidget {
 }
 
 class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
-  // Static list so shared journeys persist when returning to the screen
+  // Static list so shared journeys persist
   static final List<Map<String, dynamic>> _sharedJourneys = [];
 
-@override
+  // Groups support
+  static final List<String> _groups = [
+    'My Family',
+    'Parish Accountability',
+    'Friends in Faith',
+  ];
+
+  static final Map<String, List<Map<String, dynamic>>> _groupActivities = {};
+
+  @override
   void initState() {
     super.initState();
     if (widget.sharedJourney != null) {
-      // Prevent duplicate postings
       final newJourney = widget.sharedJourney!;
       bool alreadyShared = _sharedJourneys.any((j) => 
         j['question'] == newJourney['question'] && j['response'] == newJourney['response']
@@ -29,12 +37,51 @@ class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
     }
   }
 
+  void _createGroup() {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        final controller = TextEditingController();
+        return AlertDialog(
+          title: const Text('Create New Group'),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(hintText: 'Group name (e.g. Bible Study Group)'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () {
+                final name = controller.text.trim();
+                if (name.isNotEmpty && !_groups.contains(name)) {
+                  setState(() {
+                    _groups.add(name);
+                    _groupActivities[name] = [];
+                  });
+                }
+                Navigator.pop(ctx);
+              },
+              child: const Text('Create'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Center(child: Text('Walk Together')),
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.group_add),
+            onPressed: _createGroup,
+            tooltip: 'Create Group',
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -51,7 +98,7 @@ class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
             child: _sharedJourneys.isEmpty
                 ? const Center(
                     child: Text(
-                      'No journeys shared yet.\n\nShare from a response in Seeking God\'s Wisdom.',
+                      'No journeys shared yet.\n\nShare from a response in Seeking God\'s Wisdom or create your own activity.',
                       textAlign: TextAlign.center,
                     ),
                   )
@@ -69,8 +116,15 @@ class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         child: ListTile(
-                          title: Text(journey['title'] ?? 'Shared Journey'),
-                          subtitle: Text("Q: $questionPreview\nResponse: $responsePreview"),
+                          // No top title line — we use subtitle for everything
+                          title: null,
+                          subtitle: Text(
+                            // Sharing My Gifts Activity
+                            journey['question'].toString().startsWith('Activity:') 
+                                ? "Sharing My Gifts\nActivity: ${journey['question'].toString().replaceFirst('Activity: ', '')}\nDescription: $responsePreview"
+                                // Regular Shared Wisdom
+                                : "Shared Wisdom\nQuestion: $questionPreview\nResponse: $responsePreview"
+                          ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -115,8 +169,8 @@ class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
               children: [
                 Text(journey['title'] ?? 'Shared Journey', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
-                const Text('Question:', style: TextStyle(fontWeight: FontWeight.bold)),
-                Text(journey['question'] ?? ''),
+                const Text('Activity:', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(journey['question'] ?? 'No activity description'),
                 const SizedBox(height: 24),
                 const Text('WWJD Response:', style: TextStyle(fontWeight: FontWeight.bold)),
                 Text(journey['response'] ?? ''),

@@ -104,58 +104,57 @@ Delve Deeper – Additional Light from the Church’s Treasury
   }
 
   void _addToGiftsPlan(_ChatMessage msg) {
-    final actions = _lastExtractedActions.isNotEmpty 
-        ? _lastExtractedActions 
-        : _extractSuggestedActions(msg.text);
+  final actions = _lastExtractedActions.isNotEmpty 
+      ? _lastExtractedActions 
+      : _extractSuggestedActions(msg.text);
 
-    if (actions.isEmpty) {
-      _createSingleActivity(msg.text);
-      return;
-    }
-
-    // Multi-action dialog
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add to My Gifts Plan'),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 420,
-          child: ListView.builder(
-            itemCount: actions.length,
-            itemBuilder: (context, index) {
-              final action = actions[index];
-              return CheckboxListTile(
-                title: Text(action['title'] ?? 'Action'),
-                subtitle: Text(action['description'] ?? ''),
-                value: true,
-                onChanged: (val) {},
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              for (var action in actions) {
-                _createActivityFromMap(action);
-              }
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Actions added to Sharing My Gifts')),
-              );
-            },
-            child: const Text('Add All'),
-          ),
-        ],
-      ),
-    );
+  if (actions.isEmpty) {
+    _createSingleActivity(msg.text);
+    return;
   }
 
+  // Compact dialog — only shows the action(s), no full expanded view
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Add to My Gifts Plan'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 220, // Compact height
+        child: ListView.builder(
+          itemCount: actions.length,
+          itemBuilder: (context, index) {
+            final action = actions[index];
+           return ListTile(
+              dense: true,
+              leading: const Icon(Icons.card_giftcard, color: Colors.brown),
+              title: Text(action['title'] ?? 'Action'),
+              subtitle: Text(action['description'] ?? ''),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.pop(context);
+            for (var action in actions) {
+              _createActivityFromMap(action);
+            }
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Added to Sharing My Gifts')),
+            );
+          },
+          child: const Text('Add to Plan'),
+        ),
+      ],
+    ),
+  );
+}
   void _createActivityFromMap(Map<String, String> action) {
     final activity = GiftActivity(
       id: const Uuid().v4(),
@@ -170,11 +169,15 @@ Delve Deeper – Additional Light from the Church’s Treasury
   }
 
   void _createSingleActivity(String responseText) {
-    // fallback for non-structured responses
+    // Create a better title from the response
+    String title = responseText.length > 70 
+        ? responseText.substring(0, 67) + '...' 
+        : responseText;
+
     final activity = GiftActivity(
       id: const Uuid().v4(),
-      title: 'WWJD Action Step',
-      description: responseText.length > 280 ? responseText.substring(0, 280) + '...' : responseText,
+      title: title,
+      description: responseText,
       linkedQuestionId: 'current',
       frequency: 'Daily',
       hasReminder: true,
@@ -182,6 +185,7 @@ Delve Deeper – Additional Light from the Church’s Treasury
 
     globalGiftActivities.add(activity);
 
+    // Open the detail screen immediately
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -650,21 +654,44 @@ After the very last sentence of your response, output EXACTLY this and nothing e
   return (cleanText, actions);
 }
 
-List<Map<String, String>> _extractSuggestedActions(String text) {
-  try {
-    final jsonMatch = RegExp(r'```json\s*(\{[\s\S]*?\})\s*```', dotAll: true).firstMatch(text) ??
-                      RegExp(r'(\{[\s\S]*?"suggestedActions"[\s\S]*?\})', dotAll: true).firstMatch(text);
-    if (jsonMatch != null) {
-      final jsonStr = jsonMatch.group(1)!;
-      final data = json.decode(jsonStr);
-      final list = data['suggestedActions'] as List?;
-      return list?.map((e) => Map<String, String>.from(e)).toList() ?? [];
+  List<Map<String, String>> _extractSuggestedActions(String text) {
+    List<Map<String, String>> actions = [];
+
+    // Clean any JSON-like noise first
+    String cleanedText = text.replaceAll(RegExp(r'```json[\s\S]*?```'), '')
+                           .replaceAll(RegExp(r'\{[\s\S]*?"suggestedActions"[\s\S]*?\}'), '');
+
+    // Extract bullet-style actions
+    final RegExp actionRegExp = RegExp(
+      r'(?:^|\n)[\s•\-*]+\s*([^\n]+?)(?=\n[\s•\-*]|\n\n|$)',
+      multiLine: true,
+    );
+
+    final matches = actionRegExp.allMatches(cleanedText);
+
+    for (var match in matches) {
+      String title = match.group(1)?.trim() ?? '';
+      if (title.isEmpty || title.length < 8 || title.contains('"description"')) continue;
+
+      actions.add({
+        'title': title.length > 75 ? title.substring(0, 72) + '...' : title,
+        'description': title,
+      });
     }
-  } catch (e) {
-    print('JSON parse error: $e');
+
+    // Fallback
+    if (actions.isEmpty && cleanedText.isNotEmpty) {
+      String fallback = cleanedText.split('\n').first.trim();
+      if (fallback.length > 75) fallback = fallback.substring(0, 72) + '...';
+
+      actions.add({
+        'title': fallback,
+        'description': fallback,
+      });
+    }
+
+    return actions;
   }
-  return [];
-}
 
   // Sidebar and other methods remain unchanged
   Widget _buildSidebar({bool isInDrawer = false}) {

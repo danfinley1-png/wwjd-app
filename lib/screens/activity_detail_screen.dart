@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import '../models/gift_activity.dart';
 import '../core/app_colors.dart';
+import '../walk_together_screen.dart';
 
 class ActivityDetailScreen extends StatefulWidget {
   final GiftActivity activity;
@@ -97,7 +98,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              '${_activity.frequency} ${ _activity.specificTime != null ? 'at ${_activity.specificTime}' : ''}',
+              '${_activity.frequency} ${_activity.specificTime != null ? 'at ${_activity.specificTime}' : ''}',
               style: const TextStyle(fontSize: 16, color: Colors.grey),
             ),
             const Divider(height: 40),
@@ -109,7 +110,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
 
             const SizedBox(height: 32),
 
-            // Collapsible Note
+            // Reflection Note
             const Text('My Reflection Note', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             TextField(
@@ -124,19 +125,39 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
 
             const SizedBox(height: 32),
 
-            // Linked Question (if exists)
+            // Linked WWJD Response
             if (_activity.linkedQuestionId != null)
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text('Linked WWJD Response', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  // TODO: Button to view original response
                   TextButton.icon(
                     icon: const Icon(Icons.menu_book),
                     label: const Text('View Original Guidance'),
                     onPressed: () {
-                      // Navigate back or show dialog with linked response
+                      String displayText = 'No matching response found in your history yet.';
+
+                      if (_activity.linkedQuestionId != null) {
+                        displayText = 'Linked Question ID: ${_activity.linkedQuestionId}\n\n'
+                            'The full WWJD response and any Delve Deeper notes would be displayed here from your Seeking God\'s Wisdom history.';
+                      }
+
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Original WWJD Guidance'),
+                          content: SingleChildScrollView(
+                            child: Text(displayText),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text('Close'),
+                            ),
+                          ],
+                        ),
+                      );
                     },
                   ),
                 ],
@@ -152,15 +173,46 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                   icon: const Icon(Icons.share),
                   label: const Text('Share Anonymously'),
                   onPressed: () {
-                    // Share to Walk Together
+                    final journey = {
+                      'id': DateTime.now().millisecondsSinceEpoch,
+                      'title': _activity.title,
+                      'question': 'Activity: ${_activity.title}',
+                      'response': _activity.description,
+                      'upvotes': 0,
+                      'timestamp': DateTime.now(),
+                      'linkedActivityId': _activity.id,
+                    };
+
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => WalkTogetherScreen(sharedJourney: journey),
+                      ),
+                    );
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Shared anonymously to Walk Together!')),
+                    );
                   },
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 24),
                 TextButton.icon(
                   icon: const Icon(Icons.person_add),
                   label: const Text('Invite Others'),
                   onPressed: () {
-                    // Future: Share link or invite group
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Invite Others'),
+                        content: const Text('Feature coming soon — invite friends to join this activity.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('OK'),
+                          ),
+                        ],
+                      ),
+                    );
                   },
                 ),
               ],

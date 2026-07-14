@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'core/config.dart';
 import 'core/app_colors.dart';
 import 'screens/home_screen.dart';
+import 'screens/login_screen.dart';
+import 'firebase_options.dart';   // if you have it
 
-/// WWJD – DI Catholic Dialog App
-/// Entry point kept deliberately thin per ARCHITECTURE.md guidance.
-/// All UI, state, and mocked WWJD response logic lives in lib/screens/home_screen.dart.
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const WWJDApp());
 }
 
@@ -19,7 +23,12 @@ class WWJDApp extends StatelessWidget {
       title: AppConfig.appName,
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
-      home: const HomeScreen(),
+      initialRoute: '/login',
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/home': (context) => const HomeScreen(),
+      },
+      home: const LoginScreen(),
     );
   }
 

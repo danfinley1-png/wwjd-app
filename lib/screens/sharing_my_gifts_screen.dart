@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/gift_activity.dart';
 import '../core/app_colors.dart';
 import 'activity_detail_screen.dart';
+import '../create_activity_dialog.dart';   // ← New import
 
 class SharingMyGiftsScreen extends StatefulWidget {
   const SharingMyGiftsScreen({super.key});
@@ -86,9 +87,10 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
                     ),
                     title: Text(activity.title),
                     subtitle: Text(
-                      activity.specificTime != null
-                          ? '${activity.frequency} at ${activity.specificTime}'
-                          : activity.frequency,
+                      activity.description.length > 80 
+                          ? '${activity.description.substring(0, 80)}...' 
+                          : activity.description,
+                      style: const TextStyle(fontSize: 13),
                     ),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () {
@@ -106,11 +108,19 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
                 );
               },
             ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
-          // Placeholder for manual add - can expand later
+          showDialog(
+            context: context,
+            builder: (context) => CreateActivityDialog(
+              onActivityCreated: () {
+                setState(() {});
+              },
+            ),
+          );
         },
-        child: const Icon(Icons.add),
+        label: const Text('Add an Activity'),
+        icon: const Icon(Icons.add),
       ),
     );
   }
