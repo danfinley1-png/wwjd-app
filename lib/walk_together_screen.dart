@@ -1,18 +1,32 @@
 // lib/walk_together_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // For ValueNotifier
 
 class WalkTogetherScreen extends StatefulWidget {
   final Map<String, dynamic>? sharedJourney;
 
   const WalkTogetherScreen({super.key, this.sharedJourney});
 
+  // Public static method for sharing from other screens
+  static void addSharedJourney(Map<String, dynamic> journey) {
+    bool alreadyShared = _WalkTogetherScreenState.sharedJourneysNotifier.value.any((j) => 
+      j['question'] == journey['question'] && j['response'] == journey['response']
+    );
+    if (!alreadyShared) {
+      final updated = List<Map<String, dynamic>>.from(_WalkTogetherScreenState.sharedJourneysNotifier.value);
+      updated.add(journey);
+      _WalkTogetherScreenState.sharedJourneysNotifier.value = updated;
+    }
+  }
+
   @override
   State<WalkTogetherScreen> createState() => _WalkTogetherScreenState();
 }
 
 class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
-  // Static list so shared journeys persist
-  static final List<Map<String, dynamic>> _sharedJourneys = [];
+  // Reactive list for cross-screen updates
+  static final ValueNotifier<List<Map<String, dynamic>>> sharedJourneysNotifier = 
+      ValueNotifier<List<Map<String, dynamic>>>([]);
 
   // Groups support
   static final List<String> _groups = [
@@ -28,11 +42,13 @@ class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
     super.initState();
     if (widget.sharedJourney != null) {
       final newJourney = widget.sharedJourney!;
-      bool alreadyShared = _sharedJourneys.any((j) => 
+      bool alreadyShared = sharedJourneysNotifier.value.any((j) => 
         j['question'] == newJourney['question'] && j['response'] == newJourney['response']
       );
       if (!alreadyShared) {
-        _sharedJourneys.add(newJourney);
+        final updated = List<Map<String, dynamic>>.from(sharedJourneysNotifier.value);
+        updated.add(newJourney);
+        sharedJourneysNotifier.value = updated;
       }
     }
   }
@@ -95,55 +111,57 @@ class _WalkTogetherScreenState extends State<WalkTogetherScreen> {
           ),
           const Divider(),
           Expanded(
-            child: _sharedJourneys.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No journeys shared yet.\n\nShare from a response in Seeking God\'s Wisdom or create your own activity.',
-                      textAlign: TextAlign.center,
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: _sharedJourneys.length,
-                    itemBuilder: (context, index) {
-                      final journey = _sharedJourneys[index];
-                      final questionPreview = journey['question'].toString().length > 80 
-                          ? journey['question'].toString().substring(0, 80) + '...' 
-                          : journey['question'].toString();
-                      final responsePreview = journey['response'].toString().length > 100 
-                          ? journey['response'].toString().substring(0, 100) + '...' 
-                          : journey['response'].toString();
-
-                      return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: ListTile(
-                          // No top title line — we use subtitle for everything
-                          title: null,
-                          subtitle: Text(
-                            // Sharing My Gifts Activity
-                            journey['question'].toString().startsWith('Activity:') 
-                                ? "Sharing My Gifts\nActivity: ${journey['question'].toString().replaceFirst('Activity: ', '')}\nDescription: $responsePreview"
-                                // Regular Shared Wisdom
-                                : "Shared Wisdom\nQuestion: $questionPreview\nResponse: $responsePreview"
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text('${journey['upvotes'] ?? 0}'),
-                              IconButton(
-                                icon: const Icon(Icons.thumb_up),
-                                onPressed: () {
-                                  setState(() {
-                                    journey['upvotes'] = (journey['upvotes'] ?? 0) + 1;
-                                  });
-                                },
-                              ),
-                            ],
-                          ),
-                          onTap: () => _openJourney(journey),
+            child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+              valueListenable: sharedJourneysNotifier,
+              builder: (context, journeys, child) {
+                return journeys.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No journeys shared yet.\n\nShare from a response in Seeking God\'s Wisdom or create your own activity.',
+                          textAlign: TextAlign.center,
                         ),
+                      )
+                    : ListView.builder(
+                        itemCount: journeys.length,
+                        itemBuilder: (context, index) {
+                          final journey = journeys[index];
+                          final questionPreview = journey['question'].toString().length > 80 
+                              ? journey['question'].toString().substring(0, 80) + '...' 
+                              : journey['question'].toString();
+                          final responsePreview = journey['response'].toString().length > 100 
+                              ? journey['response'].toString().substring(0, 100) + '...' 
+                              : journey['response'].toString();
+
+                          return Card(
+                            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            child: ListTile(
+                              title: null,
+                              subtitle: Text(
+                                journey['question'].toString().startsWith('Activity:') 
+                                    ? "Sharing My Gifts\nActivity: ${journey['question'].toString().replaceFirst('Activity: ', '')}\nDescription: $responsePreview"
+                                    : "Shared Wisdom\nQuestion: $questionPreview\nResponse: $responsePreview"
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('${journey['upvotes'] ?? 0}'),
+                                  IconButton(
+                                    icon: const Icon(Icons.thumb_up),
+                                    onPressed: () {
+                                      setState(() {
+                                        journey['upvotes'] = (journey['upvotes'] ?? 0) + 1;
+                                      });
+                                    },
+                                  ),
+                                ],
+                              ),
+                              onTap: () => _openJourney(journey),
+                            ),
+                          );
+                        },
                       );
-                    },
-                  ),
+              },
+            ),
           ),
         ],
       ),

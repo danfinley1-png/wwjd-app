@@ -63,6 +63,43 @@ class GiftActivity {
         hasReminder: json['hasReminder'] ?? false,
         userId: json['userId'],
       );
+
+        // Add these two methods to the GiftActivity class
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'title': title,
+      'description': description,
+      'linkedQuestionId': linkedQuestionId,
+      'frequency': frequency,
+      'specificTime': specificTime,
+      'daysOfWeek': daysOfWeek,
+      'dueDate': dueDate?.toIso8601String(),
+      'isCompleted': isCompleted,
+      'note': note,
+      'completedAt': completedAt?.toIso8601String(),
+      'hasReminder': hasReminder,
+      'userId': userId,
+    };
+  }
+
+  factory GiftActivity.fromMap(Map<String, dynamic> map) {
+    return GiftActivity(
+      id: map['id'] ?? '',
+      title: map['title'] ?? '',
+      description: map['description'] ?? '',
+      linkedQuestionId: map['linkedQuestionId'],
+      frequency: map['frequency'] ?? 'Daily',
+      specificTime: map['specificTime'],
+      daysOfWeek: List<String>.from(map['daysOfWeek'] ?? []),
+      dueDate: map['dueDate'] != null ? DateTime.parse(map['dueDate']) : null,
+      isCompleted: map['isCompleted'] ?? false,
+      note: map['note'],
+      completedAt: map['completedAt'] != null ? DateTime.parse(map['completedAt']) : null,
+      hasReminder: map['hasReminder'] ?? false,
+      userId: map['userId'],
+    );
+  }
 }
 
 // Global list for MVP (replace with proper storage later)

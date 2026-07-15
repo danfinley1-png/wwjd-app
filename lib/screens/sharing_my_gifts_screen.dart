@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../models/gift_activity.dart';
 import '../core/app_colors.dart';
 import 'activity_detail_screen.dart';
-import '../create_activity_dialog.dart';   // ← New import
+import '../create_activity_dialog.dart';
+import '../core/services/gift_service.dart';
+import '../walk_together_screen.dart';
 
 class SharingMyGiftsScreen extends StatefulWidget {
   const SharingMyGiftsScreen({super.key});
@@ -13,12 +15,19 @@ class SharingMyGiftsScreen extends StatefulWidget {
 }
 
 class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
-  List<GiftActivity> get _activities => globalGiftActivities;
+  List<GiftActivity> _activities = [];
 
   @override
   void initState() {
     super.initState();
-    print('DEBUG: SharingMyGiftsScreen loaded with ${_activities.length} activities');
+    _loadActivities();
+  }
+
+  void _loadActivities() {
+    setState(() {
+      _activities = List.from(globalGiftActivities);
+    });
+    print('DEBUG: Loaded ${_activities.length} activities locally');
   }
 
   void _updateActivity(GiftActivity updated) {
@@ -26,12 +35,69 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
       final index = _activities.indexWhere((a) => a.id == updated.id);
       if (index != -1) {
         _activities[index] = updated;
+        globalGiftActivities[index] = updated; // Sync global
       }
     });
   }
 
+  Future<void> _showShareOptions(GiftActivity activity) async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Share Activity'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.public),
+              title: const Text('Walk Together (Community)'),
+              onTap: () => Navigator.pop(ctx, 'community'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.group),
+              title: const Text('Specific Group'),
+              onTap: () => Navigator.pop(ctx, 'group'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person),
+              title: const Text('Individual'),
+              onTap: () => Navigator.pop(ctx, 'individual'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.list),
+              title: const Text('Custom List'),
+              onTap: () => Navigator.pop(ctx, 'list'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (choice == null) return;
+
+    if (choice == 'community') {
+      WalkTogetherScreen.addSharedJourney({
+        'id': activity.id,
+        'title': 'Sharing My Gifts: ${activity.title}',
+        'question': 'Activity: ${activity.title}',
+        'response': activity.description ?? '',
+        'upvotes': 0,
+        'timestamp': DateTime.now(),
+        'shareType': 'community',
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Shared to Walk Together!')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Share to $choice - coming in next phase')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    print('DEBUG: Build - ${_activities.length} activities');
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sharing My Gifts'),
@@ -44,16 +110,9 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
                 children: [
                   Icon(Icons.card_giftcard, size: 80, color: Colors.grey),
                   SizedBox(height: 24),
-                  Text(
-                    'No activities yet',
-                    style: TextStyle(fontSize: 20),
-                  ),
+                  Text('No activities yet', style: TextStyle(fontSize: 20)),
                   SizedBox(height: 8),
-                  Text(
-                    'Tap + to add one or use "Add to My Gifts Plan"',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey),
-                  ),
+                  Text('Tap + to add one', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
                 ],
               ),
             )
@@ -90,9 +149,17 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
                       activity.description.length > 80 
                           ? '${activity.description.substring(0, 80)}...' 
                           : activity.description,
-                      style: const TextStyle(fontSize: 13),
                     ),
-                    trailing: const Icon(Icons.chevron_right),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                         IconButton(
+                          icon: const Icon(Icons.share),
+                          onPressed: () => _showShareOptions(activity),
+                        ),
+                        const Icon(Icons.chevron_right),
+                      ],
+                    ),
                     onTap: () {
                       Navigator.push(
                         context,
@@ -102,7 +169,7 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
                             onUpdate: _updateActivity,
                           ),
                         ),
-                      );
+                      ).then((_) => _loadActivities());
                     },
                   ),
                 );
@@ -114,7 +181,7 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
             context: context,
             builder: (context) => CreateActivityDialog(
               onActivityCreated: () {
-                setState(() {});
+                _loadActivities(); // Refresh after creation
               },
             ),
           );
