@@ -8,12 +8,14 @@ import 'sharing_my_gifts_screen.dart';
 import 'package:uuid/uuid.dart';
 import 'activity_detail_screen.dart';
 import '../models/gift_activity.dart';
+import '../core/auth/auth_service.dart';
+import '../widgets/auth_modal.dart';
 
 import '../core/config.dart';
 import '../widgets/spiritual_nourishment_section.dart';
 import '../core/app_colors.dart';
 import '../walk_together_screen.dart';
-import '../my_history_screen.dart';
+import 'my_history_screen.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:speech_to_text/speech_to_text.dart';
@@ -21,6 +23,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'dart:html' as html; // experimental approach
 import 'dart:io' show Platform;   // For native
 import 'package:flutter/foundation.dart' show kIsWeb;   // For web
+import '../widgets/share_button.dart';
+import '../widgets/welcome_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -49,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isIOS = !kIsWeb && Platform.isIOS;
   String? _selectedSpiritualTopic;
 
+  static bool _hasShownWelcome = false;
   static const double kDesktopBreakpoint = 900.0;
   static const double kSendButtonSize = 48.0;
   static const double kEmptyStateIconSize = 96.0;
@@ -60,24 +65,53 @@ Delve Deeper – Additional Light from the Church’s Treasury
 ... [your full delve deeper text]
 ''';
 
-   @override
-  void initState() {
-    super.initState();
-    _loadSeekingGodsWisdomScreen();
-  }
+@override
+void initState() {
+  super.initState();
 
-  void _loadSeekingGodsWisdomScreen() {
-    setState(() {
-      _messages.clear();
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    if (!mounted) return;
+
+    final authService = AuthService();
+    final currentUser = await authService.getCurrentUser();
+
+    // Restore from static history
+    if (_sessionHistory.isNotEmpty) {
+      setState(() {
+        _messages.clear();
+        _messages.addAll(List.from(_sessionHistory)); // deep copy
+      });
+    }
+
+    if (currentUser == null && !_hasShownWelcome) {
+      _hasShownWelcome = true;
+      showWelcomeDialog(context);
+    }
+  });
+
+  _loadSeekingGodsWisdomScreen();
+}
+
+void _loadSeekingGodsWisdomScreen() {
+  setState(() {
+    if (_messages.isEmpty) {
       _messages.add(_ChatMessage(
         isUser: false,
         text: "Welcome to Seeking God's Wisdom.\n\nBring any question, struggle, or decision.",
       ));
-      _sessionHistory.clear();
+    }
+
+    // Only initialize history if empty — do NOT clear existing session history
+    if (_sessionHistory.isEmpty) {
       _sessionHistory.addAll(List.from(_messages));
-    });
-    _scrollToTop();
-  }
+    } else {
+      // Restore previous history
+      _messages.clear();
+      _messages.addAll(List.from(_sessionHistory));
+    }
+  });
+  _scrollToTop();
+}
 
   void _showSeekingGodsWisdom() {
     print("DEBUG: Returning to Seeking God's Wisdom. History size: ${_sessionHistory.length}");
@@ -219,7 +253,7 @@ Delve Deeper – Additional Light from the Church’s Treasury
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => MyHistoryScreen(savedMessages: _sessionHistory),
+        builder: (context) => MyHistoryScreen(messages: _sessionHistory),
       ),
     );
   }
@@ -282,6 +316,16 @@ Delve Deeper – Additional Light from the Church’s Treasury
       ),
     );
   }
+
+  String _getLatestUserQuestion() {
+    for (int i = _messages.length - 1; i >= 0; i--) {
+      if (_messages[i].isUser) {
+        return _messages[i].text;
+      }
+    }
+    return "No question found";
+  }
+  
 
   void _showWalkTogether() {
     Navigator.push(
@@ -349,6 +393,38 @@ Delve Deeper – Additional Light from the Church’s Treasury
       }
     });
   }
+
+void _handleLogout() async {
+  final authService = AuthService();
+  await authService.signOut();
+  
+  _hasShownWelcome = false;
+
+  // Do NOT clear _sessionHistory here — we want to keep it for the session
+
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Save Your Journey'),
+      content: const Text(
+        'Sign up or log in to save your history, Sharing My Gifts plan, and continue your spiritual journey across sessions.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.pop(context);
+            showAuthModal(context);
+          },
+          child: const Text('Sign Up / Log In'),
+        ),
+      ],
+    ),
+  );
+}
 
   void _removeLoadingMessageIfPresent() {
     _messages.removeWhere((m) => m.isLoading);
@@ -533,20 +609,23 @@ Do not add any text after it.""",
 }),
 );
 if (response.statusCode == 200) {
-final data = jsonDecode(response.body);
-final String rawResponse = data['choices'][0]['message']['content'] ?? 'No response received.';
-final (cleanText, actions) = _processApiResponse(rawResponse);
-_lastExtractedActions = actions;
-setState(() {
-_removeLoadingMessageIfPresent();
-_messages.add(_ChatMessage(isUser: false, text: cleanText));
-_isSending = false;
-});
-_scrollToNewResponse();
-_sessionHistory.clear();
-_sessionHistory.addAll(List.from(_messages));
+  final data = jsonDecode(response.body);
+  final String rawResponse = data['choices'][0]['message']['content'] ?? 'No response received.';
+  final (cleanText, actions) = _processApiResponse(rawResponse);
+  _lastExtractedActions = actions;
+
+  setState(() {
+    _removeLoadingMessageIfPresent();
+    _messages.add(_ChatMessage(isUser: false, text: cleanText));
+    _isSending = false;
+  });
+  _scrollToNewResponse();
+
+  // Save full conversation (user + AI)
+  _sessionHistory.clear();
+  _sessionHistory.addAll(List.from(_messages));
 } else {
-throw Exception('API Error: ${response.statusCode}');
+  throw Exception('API Error: ${response.statusCode}');
 }
 } catch (e) {
 print('API Error: $e');
@@ -835,45 +914,65 @@ After the very last sentence of your response, output EXACTLY this and nothing e
   }
 
   PreferredSizeWidget _buildAppBar(bool isWide) {
-    return PreferredSize(
-      preferredSize: const Size.fromHeight(90),
-      child: Container(
-        height: 90,
-        decoration: const BoxDecoration(
-          color: Color(0xFF8B1E1E),
-          boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
-        ),
-        child: SafeArea(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const Icon(Icons.church, size: 36, color: Colors.white),
-              const SizedBox(width: 12),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+  return PreferredSize(
+    preferredSize: const Size.fromHeight(90),
+    child: Container(
+      height: 90,
+      decoration: const BoxDecoration(
+        color: Color(0xFF8B1E1E),
+        boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
+      ),
+      child: SafeArea(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // Left / Center branding
+            Expanded(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(AppConfig.appName, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-                  Text(AppConfig.tagline, style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                  const Icon(Icons.church, size: 36, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(AppConfig.appName, 
+                        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+                      Text(AppConfig.tagline, 
+                        style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                    ],
+                  ),
+                  const SizedBox(width: 16),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.asset(
+                      'assets/images/wwjd_header.jpg',
+                      height: 58,
+                      width: 58,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
                 ],
               ),
-              const SizedBox(width: 16),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.asset(
-                  'assets/images/wwjd_header.jpg',
-                  height: 58,
-                  width: 58,
-                  fit: BoxFit.cover,
-                ),
+            ),
+
+            // Right side - Logout button
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: IconButton(
+                icon: const Icon(Icons.logout, color: Colors.white, size: 28),
+                tooltip: 'Logout',
+                onPressed: _handleLogout,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildEmptyState() {
     return const Center(
@@ -941,7 +1040,8 @@ After the very last sentence of your response, output EXACTLY this and nothing e
               },
             ),
 
-            // Action buttons for AI responses only
+                        // Action buttons for AI responses only
+                        // Action buttons for AI responses only
             if (!isUser && !msg.isLoading && !msg.isSpiritualNourishment && !msg.isStructuredSample) ...[
               const SizedBox(height: 12),
               Row(
@@ -959,18 +1059,13 @@ After the very last sentence of your response, output EXACTLY this and nothing e
                     onPressed: () => _copyToClipboard(msg.text),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.share, size: 19),
-                    onPressed: () => _shareMessage(msg.text),
-                  ),
-                                    IconButton(
                     icon: const Icon(Icons.volume_up, size: 19),
                     onPressed: () => _speak(msg.text),
                   ),
-                  TextButton.icon(
-                    icon: const Icon(Icons.share_outlined, size: 18),
-                    label: const Text('Share Anonymously'),
-                    onPressed: () => _shareToWalkTogether(msg),
-                    style: TextButton.styleFrom(foregroundColor: AppColors.primaryMaroon),                
+                  // Central Share Button
+                  ShareButton(
+                    question: _getLatestUserQuestion(),
+                    response: msg.text,
                   ),
                   TextButton.icon(
                     icon: const Icon(Icons.card_giftcard, size: 18),

@@ -27,7 +27,6 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
     setState(() {
       _activities = List.from(globalGiftActivities);
     });
-    print('DEBUG: Loaded ${_activities.length} activities locally');
   }
 
   void _updateActivity(GiftActivity updated) {
@@ -35,7 +34,7 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
       final index = _activities.indexWhere((a) => a.id == updated.id);
       if (index != -1) {
         _activities[index] = updated;
-        globalGiftActivities[index] = updated; // Sync global
+        globalGiftActivities[index] = updated;
       }
     });
   }
@@ -78,26 +77,26 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
     if (choice == 'community') {
       WalkTogetherScreen.addSharedJourney({
         'id': activity.id,
-        'title': 'Sharing My Gifts: ${activity.title}',
+        'title': activity.title,
         'question': 'Activity: ${activity.title}',
-        'response': activity.description ?? '',
+        'response': activity.description ?? 'No description provided.',
+        'note': activity.note ?? '',
         'upvotes': 0,
         'timestamp': DateTime.now(),
-        'shareType': 'community',
+        'hasGiftsLink': true,
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Shared to Walk Together!')),
+        const SnackBar(content: Text('Shared anonymously to Walk Together!')),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Share to $choice - coming in next phase')),
+        SnackBar(content: Text('Share to $choice — coming soon')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    print('DEBUG: Build - ${_activities.length} activities');
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sharing My Gifts'),
@@ -112,7 +111,7 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
                   SizedBox(height: 24),
                   Text('No activities yet', style: TextStyle(fontSize: 20)),
                   SizedBox(height: 8),
-                  Text('Tap + to add one', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                  Text('Tap + to add one', style: TextStyle(color: Colors.grey)),
                 ],
               ),
             )
@@ -123,7 +122,7 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
                 final activity = _activities[index];
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
-                  child: ListTile(
+                  child: ExpansionTile(
                     leading: Checkbox(
                       value: activity.isCompleted,
                       onChanged: (_) => _updateActivity(
@@ -144,33 +143,41 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
                         ),
                       ),
                     ),
-                    title: Text(activity.title),
+                    title: Text(activity.title, style: const TextStyle(fontWeight: FontWeight.bold)),
                     subtitle: Text(
-                      activity.description.length > 80 
-                          ? '${activity.description.substring(0, 80)}...' 
+                      activity.description.length > 60
+                          ? '${activity.description.substring(0, 60)}...'
                           : activity.description,
                     ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                         IconButton(
-                          icon: const Icon(Icons.share),
-                          onPressed: () => _showShareOptions(activity),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Description:', style: TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 4),
+                            Text(activity.description),
+                            if (activity.note?.isNotEmpty == true) ...[
+                              const SizedBox(height: 12),
+                              const Text('Note:', style: TextStyle(fontWeight: FontWeight.bold)),
+                              Text(activity.note!),
+                            ],
+                            const SizedBox(height: 16),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                TextButton.icon(
+                                  icon: const Icon(Icons.share),
+                                  label: const Text('Share'),
+                                  onPressed: () => _showShareOptions(activity),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                        const Icon(Icons.chevron_right),
-                      ],
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ActivityDetailScreen(
-                            activity: activity,
-                            onUpdate: _updateActivity,
-                          ),
-                        ),
-                      ).then((_) => _loadActivities());
-                    },
+                      ),
+                    ],
                   ),
                 );
               },
@@ -180,9 +187,7 @@ class _SharingMyGiftsScreenState extends State<SharingMyGiftsScreen> {
           showDialog(
             context: context,
             builder: (context) => CreateActivityDialog(
-              onActivityCreated: () {
-                _loadActivities(); // Refresh after creation
-              },
+              onActivityCreated: _loadActivities,
             ),
           );
         },

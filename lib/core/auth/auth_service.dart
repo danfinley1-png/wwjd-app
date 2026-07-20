@@ -3,12 +3,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Google Sign In (existing)
+  // Google Sign In
   Future<User?> signInWithGoogle() async {
     // ... your existing Google code ...
+    // (keep whatever you already have here)
   }
 
-  // New: Email + Password
+  // Email + Password Sign In
   Future<User?> signInWithEmail(String email, String password) async {
     try {
       final UserCredential credential = await _auth.signInWithEmailAndPassword(
@@ -19,6 +20,16 @@ class AuthService {
     } catch (e) {
       print('Email sign in error: $e');
       rethrow;
+    }
+  }
+
+  // Get current user (new)
+  Future<User?> getCurrentUser() async {
+    try {
+      return _auth.currentUser;
+    } catch (e) {
+      print('Error getting current user: $e');
+      return null;
     }
   }
 

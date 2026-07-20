@@ -3,8 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'core/config.dart';
 import 'core/app_colors.dart';
 import 'screens/home_screen.dart';
-import 'screens/login_screen.dart';
-import 'firebase_options.dart';   // if you have it
+import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,18 +22,14 @@ class WWJDApp extends StatelessWidget {
       title: AppConfig.appName,
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
-      initialRoute: '/login',
+      initialRoute: '/home',
       routes: {
-        '/login': (context) => const LoginScreen(),
         '/home': (context) => const HomeScreen(),
       },
-      home: const LoginScreen(),
+      home: const HomeScreen(),
     );
   }
 
-  /// Material 3 theme with warm Catholic aesthetic.
-  /// Primary maroon + parchment surfaces + subtle gold accents.
-  /// See AppColors for the single source of truth for palette values.
   ThemeData _buildTheme() {
     final base = AppColors.lightColorScheme;
 
