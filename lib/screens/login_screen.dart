@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/auth/auth_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -53,7 +55,6 @@ class _LoginScreenState extends State<LoginScreen> {
               const Text('What Would Jesus Do?', style: TextStyle(fontSize: 18)),
               const SizedBox(height: 60),
 
-              // Email field
               TextField(
                 controller: _emailController,
                 decoration: const InputDecoration(
@@ -64,7 +65,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Password field
               TextField(
                 controller: _passwordController,
                 decoration: const InputDecoration(
@@ -88,10 +88,12 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 16),
               ElevatedButton.icon(
                 onPressed: () async {
+                  setState(() => _isLoading = true);
                   final user = await _authService.signInWithGoogle();
                   if (user != null && mounted) {
                     Navigator.pushReplacementNamed(context, '/home');
                   }
+                  if (mounted) setState(() => _isLoading = false);
                 },
                 icon: const Icon(Icons.g_mobiledata),
                 label: const Text('Sign in with Google'),

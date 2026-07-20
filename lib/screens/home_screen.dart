@@ -10,6 +10,9 @@ import 'activity_detail_screen.dart';
 import '../models/gift_activity.dart';
 import '../core/auth/auth_service.dart';
 import '../widgets/auth_modal.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'login_screen.dart';
 
 import '../core/config.dart';
 import '../widgets/spiritual_nourishment_section.dart';
@@ -35,34 +38,45 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final List<_ChatMessage> _messages = [];
+  static final List<_ChatMessage> _sessionHistory = [];
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  // Shared journeys for Walk Together (persisted in memory for now)
+
+  // Shared journeys for Walk Together
   final List<Map<String, dynamic>> _sharedJourneys = [];
-  static final List<_ChatMessage> _sessionHistory = [];
+
   final GlobalKey _latestMessageKey = GlobalKey();
+
+  // Speech
   final SpeechToText speech = SpeechToText();
   final FlutterTts flutterTts = FlutterTts();
-  List<Map<String, String>> _lastExtractedActions = [];
-  
   bool _isListening = false;
+
+  // Firebase
+  final AuthService _authService = AuthService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  String? _userId;
+
+  // Other state
+  List<Map<String, String>> _lastExtractedActions = [];
   bool _isMockMode = false;
   bool _isSending = false;
-  bool isMobile = !kIsWeb && (Platform.isIOS || Platform.isAndroid);
-  bool isWeb = kIsWeb;
-  bool isIOS = !kIsWeb && Platform.isIOS;
   String? _selectedSpiritualTopic;
+  bool isWeb = kIsWeb;
+    bool isMobile = !kIsWeb && (Platform.isIOS || Platform.isAndroid);
+    bool isIOS = !kIsWeb && Platform.isIOS;
 
   static bool _hasShownWelcome = false;
+
   static const double kDesktopBreakpoint = 900.0;
   static const double kSendButtonSize = 48.0;
   static const double kEmptyStateIconSize = 96.0;
   static const double kMessageMaxWidthUser = 0.78;
   static const double kMessageMaxWidthAssistant = 0.92;
+
   static const String _delveDeeperResponse = '''
-  static const double kSidebarWidth = 290.0;
 Delve Deeper – Additional Light from the Church’s Treasury
-... [your full delve deeper text]
+... [your full delve deeper text here]
 ''';
 
 @override
@@ -236,6 +250,41 @@ void _loadSeekingGodsWisdomScreen() {
     );
   }
     
+  Future<void> _saveSessionToFirebase() async {
+    if (_userId == null) return;
+    try {
+      await _firestore.collection('users').doc(_userId).set({
+        'sessionHistory': _sessionHistory.map((m) => m.toMap()).toList(),
+        'sharedJourneys': _sharedJourneys,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      print('Save error: $e');
+    }
+  }
+
+  Future<void> _loadSessionFromFirebase() async {
+    if (_userId == null) return;
+    try {
+      final doc = await _firestore.collection('users').doc(_userId).get();
+      if (doc.exists) {
+        final data = doc.data();
+        if (data?['sessionHistory'] != null) {
+          _sessionHistory.clear();
+          _sessionHistory.addAll(
+            (data!['sessionHistory'] as List).map((m) => _ChatMessage.fromMap(m)).toList()
+          );
+        }
+        if (data?['sharedJourneys'] != null) {
+          _sharedJourneys.clear();
+          _sharedJourneys.addAll(List<Map<String, dynamic>>.from(data!['sharedJourneys']));
+        }
+      }
+    } catch (e) {
+      print('Load error: $e');
+    }
+  }
+  
   void _showMyMoralDilemmas() {
     setState(() {
       _messages.clear();
@@ -334,6 +383,67 @@ void _loadSeekingGodsWisdomScreen() {
         builder: (context) => const WalkTogetherScreen(),
       ),
     );
+  }
+
+  void _showAuthModal() {
+    final user = _authService.currentUser;
+    
+      if (user != null) {
+      // Signed in - show logout confirmation
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Sign Out'),
+          content: const Text('Proceed to logout?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _saveSessionToFirebase().then((_) {
+                  _authService.signOut().then((_) {
+                    setState(() {
+                      _messages.clear();
+                      _sessionHistory.clear();
+                    });
+                    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => LoginScreen()));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Signed out successfully')),
+                    );
+                  });
+                });
+              },
+              child: const Text('Proceed to Logout', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // Not signed in - show Save Journey prompt
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Save Your Journey'),
+          content: const Text('Sign up or log in to save your history, Sharing My Gifts plan, and continue your spiritual journey across sessions.'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => LoginScreen()));
+              },
+              child: const Text('Sign Up / Log In'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   void _showTermsAndPrivacy() {
@@ -773,7 +883,7 @@ After the very last sentence of your response, output EXACTLY this and nothing e
   }
 
   // Sidebar and other methods remain unchanged
-  Widget _buildSidebar({bool isInDrawer = false}) {
+    Widget _buildSidebar({bool isInDrawer = false}) {
     return Container(
       width: isInDrawer ? null : 290.0,
       color: AppColors.sidebarBackground,
@@ -783,13 +893,21 @@ After the very last sentence of your response, output EXACTLY this and nothing e
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Account / Sign In
+              _sidebarTile(Icons.account_circle, 'Sign In / Account', _showAuthModal),
+
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+                child: Divider(),
+              ),
+
               // Tools for the Journey
               const Padding(
                 padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
                 child: Text('Tools for the Journey', 
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ),
-              _sidebarTile(Icons.balance, "Seeking God's Wisdom", _showSeekingGodsWisdom),
+              _sidebarTile(Icons.lightbulb_outline, "Seeking God's Wisdom", _showSeekingGodsWisdom),
               _sidebarTile(Icons.card_giftcard, 'Sharing My Gifts', _showSharingMyGifts),
               _sidebarTile(Icons.history, 'My History', _showMyHistory),
               _sidebarTile(Icons.people_outline, 'Walk Together', _showWalkTogether),
@@ -850,7 +968,7 @@ After the very last sentence of your response, output EXACTLY this and nothing e
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width >= kDesktopBreakpoint;
 
-    return Scaffold(
+      return Scaffold(
       appBar: _buildAppBar(isWide),
       drawer: isWide ? null : Drawer(child: _buildSidebar(isInDrawer: true)),
       body: LayoutBuilder(
@@ -914,65 +1032,64 @@ After the very last sentence of your response, output EXACTLY this and nothing e
   }
 
   PreferredSizeWidget _buildAppBar(bool isWide) {
-  return PreferredSize(
-    preferredSize: const Size.fromHeight(90),
-    child: Container(
-      height: 90,
-      decoration: const BoxDecoration(
-        color: Color(0xFF8B1E1E),
-        boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
-      ),
-      child: SafeArea(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            // Left / Center branding
-            Expanded(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.church, size: 36, color: Colors.white),
-                  const SizedBox(width: 12),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(AppConfig.appName, 
-                        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-                      Text(AppConfig.tagline, 
-                        style: const TextStyle(fontSize: 12, color: Colors.white70)),
-                    ],
-                  ),
-                  const SizedBox(width: 16),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.asset(
-                      'assets/images/wwjd_header.jpg',
-                      height: 58,
-                      width: 58,
-                      fit: BoxFit.cover,
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(90),
+      child: Container(
+        height: 90,
+        decoration: const BoxDecoration(
+          color: Color(0xFF8B1E1E),
+          boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
+        ),
+        child: SafeArea(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Centered branding
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.church, size: 36, color: Colors.white),
+                    const SizedBox(width: 12),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(AppConfig.appName, 
+                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+                        Text(AppConfig.tagline, 
+                          style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                      ],
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 16),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.asset(
+                        'assets/images/wwjd_header.jpg',
+                        height: 58,
+                        width: 58,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
 
-            // Right side - Logout button
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: IconButton(
-                icon: const Icon(Icons.logout, color: Colors.white, size: 28),
-                tooltip: 'Logout',
-                onPressed: _handleLogout,
+              // Right side - Logout button
+              Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: IconButton(
+                  icon: const Icon(Icons.logout, color: Colors.white),
+                  onPressed: _showAuthModal,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildEmptyState() {
     return const Center(
@@ -1165,8 +1282,8 @@ class _ChatMessage {
   final bool isStructuredSample;
   final bool isLoading;
   final bool isSpiritualNourishment;
-  bool isShared;                    // ← Add this
-  DateTime? sharedAt;               // ← Add this (optional timestamp)
+  bool isShared = false;
+  DateTime? sharedAt;
 
   _ChatMessage({
     required this.isUser,
@@ -1174,9 +1291,33 @@ class _ChatMessage {
     this.isStructuredSample = false,
     this.isLoading = false,
     this.isSpiritualNourishment = false,
-    this.isShared = false,          // default false
+    this.isShared = false,
     this.sharedAt,
   });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'isUser': isUser,
+      'text': text,
+      'isStructuredSample': isStructuredSample,
+      'isLoading': isLoading,
+      'isSpiritualNourishment': isSpiritualNourishment,
+      'isShared': isShared,
+      'sharedAt': sharedAt?.toIso8601String(),
+    };
+  }
+
+  static _ChatMessage fromMap(Map<String, dynamic> map) {
+    return _ChatMessage(
+      isUser: map['isUser'] ?? false,
+      text: map['text'] ?? '',
+      isStructuredSample: map['isStructuredSample'] ?? false,
+      isLoading: map['isLoading'] ?? false,
+      isSpiritualNourishment: map['isSpiritualNourishment'] ?? false,
+      isShared: map['isShared'] ?? false,
+      sharedAt: map['sharedAt'] != null ? DateTime.parse(map['sharedAt']) : null,
+    );
+  }
 }
 
 class _StructuredWWJDResponse extends StatelessWidget {
@@ -1212,6 +1353,24 @@ class _StructuredWWJDResponse extends StatelessWidget {
           onPressed: onDelveDeeper,
           icon: const Icon(Icons.menu_book_outlined),
           label: const Text('Delve Deeper'),
+        ),
+      ],
+    );
+  }
+}
+// Simple Auth Modal
+class AuthModal extends StatelessWidget {
+  const AuthModal({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Account'),
+      content: const Text('Sign in / Register coming soon.\n\nUse Google or Email.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
         ),
       ],
     );
