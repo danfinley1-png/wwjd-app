@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../core/providers/app_providers.dart';
 import '../walk_together_screen.dart';
 
-class ShareButton extends StatelessWidget {
+class ShareButton extends ConsumerWidget {
   final String question;
   final String response;
   final String? title;
@@ -13,13 +17,13 @@ class ShareButton extends StatelessWidget {
     this.title,
   });
 
-  void _showShareOptions(BuildContext context) {
+  void _showShareOptions(BuildContext context, WidgetRef ref) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Share Anonymously'),
+        title: const Text('Share Reflection'),
         content: const Text(
-          'This will share your question + WWJD response anonymously to the community.\n\n'
+          'Share a link to this question and WWJD response. '
           'Please ensure no personal or confidential information is included.',
           style: TextStyle(fontSize: 15),
         ),
@@ -31,31 +35,57 @@ class ShareButton extends StatelessWidget {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
+              _shareDeepLink(context, ref);
+            },
+            child: const Text('Share Link', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
               _shareToWalkTogether(context);
             },
-            child: const Text('Walk Together (Community)', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Sharing to Specific Group coming soon')),
-              );
-            },
-            child: const Text('Specific Group'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Sharing to Individual coming soon')),
-              );
-            },
-            child: const Text('Individual'),
+            child: const Text('Walk Together'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _shareDeepLink(BuildContext context, WidgetRef ref) async {
+    try {
+      final shareService = ref.read(shareServiceProvider);
+      final auth = ref.read(authServiceProvider);
+      final shareId = await shareService.createShare(
+        question: question,
+        response: response,
+        title: title,
+        createdByUid: auth.currentUser?.uid,
+      );
+      final url = shareService.buildShareUrl(shareId);
+      final preview = question.length > 120
+          ? '${question.substring(0, 117)}...'
+          : question;
+
+      await SharePlus.instance.share(
+        ShareParams(
+          uri: Uri.parse(url),
+          subject: title ?? 'WWJD Shared Reflection',
+          text: 'Someone shared a WWJD reflection with you.\n\n$preview\n\n$url',
+        ),
+      );
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Share link ready')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not share: $e')),
+        );
+      }
+    }
   }
 
   void _shareToWalkTogether(BuildContext context) {
@@ -74,11 +104,11 @@ class ShareButton extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return TextButton.icon(
-      icon: const Icon(Icons.share, size: 20),
-      label: const Text('Share'),
-      onPressed: () => _showShareOptions(context),
+  Widget build(BuildContext context, WidgetRef ref) {
+    return IconButton(
+      icon: const Icon(Icons.share_outlined, size: 22),
+      tooltip: 'Share reflection',
+      onPressed: () => _showShareOptions(context, ref),
     );
   }
 }

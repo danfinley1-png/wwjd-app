@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -8,39 +9,42 @@ import 'sharing_my_gifts_screen.dart';
 import 'package:uuid/uuid.dart';
 import 'activity_detail_screen.dart';
 import '../models/gift_activity.dart';
+import '../models/chat_message.dart';
 import '../core/auth/auth_service.dart';
+import '../core/services/gift_service.dart';
+import '../core/services/voice_service.dart';
+import '../core/providers/app_providers.dart';
 import '../widgets/auth_modal.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'login_screen.dart';
 
 import '../core/config.dart';
+import '../core/wwjd_system_prompt.dart';
 import '../widgets/spiritual_nourishment_section.dart';
 import '../core/app_colors.dart';
+import '../core/responsive_layout.dart';
 import '../walk_together_screen.dart';
 import 'my_history_screen.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:speech_to_text/speech_to_text.dart';
-import 'package:flutter_tts/flutter_tts.dart';
-import 'dart:html' as html; // experimental approach
-import 'dart:io' show Platform;   // For native
-import 'package:flutter/foundation.dart' show kIsWeb;   // For web
 import '../widgets/share_button.dart';
 import '../widgets/welcome_dialog.dart';
+import '../widgets/auth_layout.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  final List<_ChatMessage> _messages = [];
-  static final List<_ChatMessage> _sessionHistory = [];
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  final List<ChatMessage> _messages = [];
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  final GlobalKey _homeKey = GlobalKey();
 
   // Shared journeys for Walk Together
   final List<Map<String, dynamic>> _sharedJourneys = [];
@@ -48,13 +52,13 @@ class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey _latestMessageKey = GlobalKey();
 
   // Speech
-  final SpeechToText speech = SpeechToText();
-  final FlutterTts flutterTts = FlutterTts();
+  final VoiceService _voiceService = VoiceService();
   bool _isListening = false;
 
-  // Firebase
-  final AuthService _authService = AuthService();
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  // Services (via Riverpod)
+  AuthService get _authService => ref.read(authServiceProvider);
+  GiftService get _giftService => ref.read(giftServiceProvider);
+  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
   String? _userId;
 
   // Other state
@@ -62,13 +66,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isMockMode = false;
   bool _isSending = false;
   String? _selectedSpiritualTopic;
-  bool isWeb = kIsWeb;
-    bool isMobile = !kIsWeb && (Platform.isIOS || Platform.isAndroid);
-    bool isIOS = !kIsWeb && Platform.isIOS;
 
   static bool _hasShownWelcome = false;
 
-  static const double kDesktopBreakpoint = 900.0;
   static const double kSendButtonSize = 48.0;
   static const double kEmptyStateIconSize = 96.0;
   static const double kMessageMaxWidthUser = 0.78;
@@ -82,77 +82,164 @@ Delve Deeper – Additional Light from the Church’s Treasury
 @override
 void initState() {
   super.initState();
-
-  WidgetsBinding.instance.addPostFrameCallback((_) async {
-    if (!mounted) return;
-
-    final authService = AuthService();
-    final currentUser = await authService.getCurrentUser();
-
-    // Restore from static history
-    if (_sessionHistory.isNotEmpty) {
-      setState(() {
-        _messages.clear();
-        _messages.addAll(List.from(_sessionHistory)); // deep copy
-      });
-    }
-
-    if (currentUser == null && !_hasShownWelcome) {
-      _hasShownWelcome = true;
-      showWelcomeDialog(context);
-    }
-  });
-
-  _loadSeekingGodsWisdomScreen();
+  _initVoice();
+  WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
 }
 
-void _loadSeekingGodsWisdomScreen() {
-  setState(() {
-    if (_messages.isEmpty) {
-      _messages.add(_ChatMessage(
+Future<void> _initVoice() async {
+  await _voiceService.initialize(
+    onPartialText: (text) {
+      if (mounted) setState(() => _controller.text = text);
+    },
+    onListeningChanged: (listening) {
+      if (mounted) setState(() => _isListening = listening);
+    },
+    onError: (message) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      }
+    },
+  );
+}
+
+@override
+void dispose() {
+  _voiceService.dispose();
+  _controller.dispose();
+  _scrollController.dispose();
+  super.dispose();
+}
+
+Future<void> _bootstrap() async {
+  if (!mounted) return;
+
+  await ref.read(authServiceProvider).waitForAuthReady();
+  final user = _authService.currentUser;
+
+  if (user != null) {
+    await _loadSessionFromFirebase();
+  } else {
+    _loadSeekingGodsWisdomScreen();
+  }
+
+  if (user == null && !_hasShownWelcome) {
+    _hasShownWelcome = true;
+    showWelcomeDialog(context, ref);
+  }
+}
+
+  List<ChatMessage> get _sessionHistory => ref.read(sessionHistoryProvider);
+
+  ChatMessage _staticPrompt(String text) => ChatMessage(
         isUser: false,
-        text: "Welcome to Seeking God's Wisdom.\n\nBring any question, struggle, or decision.",
-      ));
-    }
+        text: text,
+        isStaticPrompt: true,
+      );
 
-    // Only initialize history if empty — do NOT clear existing session history
-    if (_sessionHistory.isEmpty) {
-      _sessionHistory.addAll(List.from(_messages));
-    } else {
-      // Restore previous history
-      _messages.clear();
-      _messages.addAll(List.from(_sessionHistory));
+  ChatMessage _welcomeMessage() => _staticPrompt(
+        "Welcome to Seeking God's Wisdom.\n\nBring any question, struggle, or decision.",
+      );
+
+  /// Load history from Firebase, merge guest cache, update provider and UI.
+  Future<void> _loadSessionFromFirebase() async {
+    try {
+      await ref.read(sessionHistoryProvider.notifier).loadSessionFromFirebase();
+      if (!mounted) return;
+      _applySessionHistoryToMessages();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load history: $e')),
+        );
+      }
     }
-  });
-  _scrollToTop();
-}
+  }
+
+  /// Persist only real conversation messages (excludes welcome/static prompts).
+  Future<void> _saveSessionToFirebase() async {
+    try {
+      final conversation = _messages.where((m) => m.isPersistable).toList();
+      await ref.read(sessionHistoryProvider.notifier).saveSessionToFirebase(conversation);
+    } catch (e) {
+      debugPrint('Save history error: $e');
+    }
+  }
+
+  void _applySessionHistoryToMessages() {
+    final hadConversation = _sessionHistory.isNotEmpty;
+    setState(() {
+      final history = _sessionHistory;
+      if (history.isNotEmpty) {
+        _messages.clear();
+        _messages.addAll(history);
+      } else if (_messages.isEmpty) {
+        _messages.add(_welcomeMessage());
+      }
+    });
+    _scrollAfterMessagesUpdated(scrollToLatest: hadConversation);
+  }
+
+  void _loadSeekingGodsWisdomScreen() {
+    final hadConversation = _sessionHistory.isNotEmpty;
+    setState(() {
+      if (_messages.isEmpty) {
+        _messages.add(_welcomeMessage());
+      }
+
+      final history = _sessionHistory;
+      if (history.isNotEmpty) {
+        _messages.clear();
+        _messages.addAll(history);
+      }
+    });
+    _scrollAfterMessagesUpdated(scrollToLatest: hadConversation);
+  }
+
+  /// Ensures a Firebase user exists (anonymous guest if needed) for Firestore writes.
+  Future<String?> _ensureAuthUidForGifts() async {
+    var user = _authService.currentUser;
+    if (user != null) return user.uid;
+
+    try {
+      await ref.read(authCoordinatorProvider).continueAsGuest();
+      return _authService.currentUser?.uid;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save gift: $e')),
+        );
+      }
+      return null;
+    }
+  }
 
   void _showSeekingGodsWisdom() {
-    print("DEBUG: Returning to Seeking God's Wisdom. History size: ${_sessionHistory.length}");
+    final hadConversation = _sessionHistory.isNotEmpty;
     setState(() {
       _messages.clear();
       _messages.addAll(_sessionHistory);
       if (_messages.isEmpty) {
-        _messages.add(_ChatMessage(
-          isUser: false,
-          text: "Welcome to Seeking God's Wisdom.\n\nBring any question, struggle, or decision.",
-        ));
+        _messages.add(_welcomeMessage());
       }
     });
-    _scrollToTop();
+    _scrollAfterMessagesUpdated(scrollToLatest: hadConversation);
   }
 
   void _showSharingMyGifts() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => SharingMyGiftsScreen(),   // Remove const
+        builder: (context) => const SharingMyGiftsScreen(),
       ),
-    );
+    ).then((_) {
+      if (mounted) _applySessionHistoryToMessages();
+    });
   }
 
-  void _addToGiftsPlan(_ChatMessage msg) {
-  final actions = _lastExtractedActions.isNotEmpty 
+  void _addToGiftsPlan(ChatMessage msg) {
+  final actions = _lastExtractedActions.isNotEmpty
       ? _lastExtractedActions 
       : _extractSuggestedActions(msg.text);
 
@@ -164,62 +251,107 @@ void _loadSeekingGodsWisdomScreen() {
   // Compact dialog — only shows the action(s), no full expanded view
   showDialog(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Add to My Gifts Plan'),
-      content: SizedBox(
-        width: double.maxFinite,
-        height: 220, // Compact height
-        child: ListView.builder(
-          itemCount: actions.length,
-          itemBuilder: (context, index) {
-            final action = actions[index];
-           return ListTile(
-              dense: true,
-              leading: const Icon(Icons.card_giftcard, color: Colors.brown),
-              title: Text(action['title'] ?? 'Action'),
-              subtitle: Text(action['description'] ?? ''),
-            );
-          },
+    builder: (context) {
+      final compact = isCompactWidth(context);
+      final maxHeight = MediaQuery.sizeOf(context).height * (compact ? 0.55 : 0.4);
+
+      return ResponsiveAuthDialog(
+        title: const Text('Add to My Gifts Plan'),
+        content: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight.clamp(180, 420)),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: actions.length,
+            itemBuilder: (context, index) {
+              final action = actions[index];
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                isThreeLine: true,
+                leading: const Icon(Icons.card_giftcard, color: Colors.brown),
+                title: Text(
+                  action['title'] ?? 'Action',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  '${action['description'] ?? ''}\n${action['frequency'] ?? 'Daily'}',
+                ),
+              );
+            },
+          ),
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+        actions: AuthDialogActions(
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                final linkedQuestion = _getLatestUserQuestion();
+                final linkedResponse = msg.text;
+                for (var action in actions) {
+                  _createActivityFromMap(
+                    action,
+                    linkedQuestion: linkedQuestion,
+                    linkedResponse: linkedResponse,
+                  );
+                }
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Added to Sharing My Gifts')),
+                );
+              },
+              child: const Text('Add to Plan'),
+            ),
+          ],
         ),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.pop(context);
-            for (var action in actions) {
-              _createActivityFromMap(action);
-            }
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Added to Sharing My Gifts')),
-            );
-          },
-          child: const Text('Add to Plan'),
-        ),
-      ],
-    ),
+      );
+    },
   );
 }
-  void _createActivityFromMap(Map<String, String> action) {
+  Future<void> _createActivityFromMap(
+    Map<String, String> action, {
+    String? linkedQuestion,
+    String? linkedResponse,
+  }) async {
+    final uid = await _ensureAuthUidForGifts();
+    if (uid == null) return;
+
     final activity = GiftActivity(
       id: const Uuid().v4(),
       title: action['title'] ?? 'WWJD Action',
       description: action['description'] ?? '',
       linkedQuestionId: 'current',
+      linkedQuestionText: linkedQuestion,
+      linkedResponseText: linkedResponse,
       frequency: action['frequency'] ?? 'Daily',
       hasReminder: true,
+      userId: uid,
+      createdAt: DateTime.now(),
     );
 
-    globalGiftActivities.add(activity);
+    try {
+      await _giftService.saveGift(activity);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Added to Sharing My Gifts')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
-  void _createSingleActivity(String responseText) {
-    // Create a better title from the response
-    String title = responseText.length > 70 
-        ? responseText.substring(0, 67) + '...' 
+    Future<void> _createSingleActivity(String responseText) async {
+    final uid = await _ensureAuthUidForGifts();
+    if (uid == null) return;
+
+    String title = responseText.length > 70
+        ? '${responseText.substring(0, 67)}...'
         : responseText;
 
     final activity = GiftActivity(
@@ -227,70 +359,44 @@ void _loadSeekingGodsWisdomScreen() {
       title: title,
       description: responseText,
       linkedQuestionId: 'current',
+      linkedQuestionText: _getLatestUserQuestion(),
+      linkedResponseText: responseText,
       frequency: 'Daily',
       hasReminder: true,
+      userId: uid,
+      createdAt: DateTime.now(),
     );
 
-    globalGiftActivities.add(activity);
-
-    // Open the detail screen immediately
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ActivityDetailScreen(
-          activity: activity,
-          onUpdate: (updated) {
-            final index = globalGiftActivities.indexWhere((a) => a.id == updated.id);
-            if (index != -1) {
-              globalGiftActivities[index] = updated;
-            }
-          },
-        ),
-      ),
-    );
-  }
-    
-  Future<void> _saveSessionToFirebase() async {
-    if (_userId == null) return;
     try {
-      await _firestore.collection('users').doc(_userId).set({
-        'sessionHistory': _sessionHistory.map((m) => m.toMap()).toList(),
-        'sharedJourneys': _sharedJourneys,
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } catch (e) {
-      print('Save error: $e');
-    }
-  }
+      await _giftService.saveGift(activity);
 
-  Future<void> _loadSessionFromFirebase() async {
-    if (_userId == null) return;
-    try {
-      final doc = await _firestore.collection('users').doc(_userId).get();
-      if (doc.exists) {
-        final data = doc.data();
-        if (data?['sessionHistory'] != null) {
-          _sessionHistory.clear();
-          _sessionHistory.addAll(
-            (data!['sessionHistory'] as List).map((m) => _ChatMessage.fromMap(m)).toList()
-          );
-        }
-        if (data?['sharedJourneys'] != null) {
-          _sharedJourneys.clear();
-          _sharedJourneys.addAll(List<Map<String, dynamic>>.from(data!['sharedJourneys']));
-        }
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ActivityDetailScreen(
+              activity: activity,
+              onUpdate: (updated) {
+                _giftService.saveGift(updated);
+              },
+            ),
+          ),
+        );
       }
     } catch (e) {
-      print('Load error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
-  
+    
   void _showMyMoralDilemmas() {
     setState(() {
       _messages.clear();
-      _messages.add(_ChatMessage(
-        isUser: false,
-        text: "**My Moral Dilemmas**\n\n"
+      _messages.add(_staticPrompt(
+        "**My Moral Dilemmas**\n\n"
             "This is the heart of our shared journey. Bring any moral question, ethical dilemma, or difficult decision here.\n\n"
             "WWJD will help you discern with clarity according to Church teaching.",
       ));
@@ -302,12 +408,14 @@ void _loadSeekingGodsWisdomScreen() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => MyHistoryScreen(messages: _sessionHistory),
+        builder: (context) => const MyHistoryScreen(),
       ),
-    );
+    ).then((_) {
+      if (mounted) _applySessionHistoryToMessages();
+    });
   }
 
-  void _shareToWalkTogether(_ChatMessage msg) {
+  void _shareToWalkTogether(ChatMessage msg) {
     // Find the correct user question for this specific response
     String userQuestion = "No specific question found";
     bool foundResponse = false;
@@ -385,76 +493,182 @@ void _loadSeekingGodsWisdomScreen() {
     );
   }
 
-  void _showAuthModal() {
+ void _showAuthModal() {
+  final user = _authService.currentUser;
+
+  if (user == null || user.isAnonymous) {
+    showDialog(
+      context: context,
+      builder: (context) => ResponsiveAuthDialog(
+        title: const Text('Save Your Journey'),
+        content: const Text(
+          'You are currently continuing as a Guest.\n\n'
+          'Sign in or register to permanently save your history, '
+          'Sharing My Gifts plan, and continue across sessions.',
+        ),
+        actions: AuthDialogActions(
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                showAuthModal(context, ref);
+              },
+              child: const Text('Sign In / Register'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel / Continue as Guest'),
+            ),
+          ],
+        ),
+      ),
+    );
+  } else {
+    showDialog(
+      context: context,
+      builder: (context) => ResponsiveAuthDialog(
+        title: const Text('Account'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Signed in as'),
+            const SizedBox(height: 6),
+            Text(
+              user.email ?? 'Unknown',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Your journey is being saved automatically.',
+              style: TextStyle(color: Colors.black54),
+            ),
+          ],
+        ),
+        actions: AuthDialogActions(
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _confirmLogout();
+              },
+              child: const Text('Sign Out', style: TextStyle(color: Colors.red)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+  /// Shows logout confirmation — retention reminder for guests, standard confirm for signed-in users.
+  void _confirmLogout() {
     final user = _authService.currentUser;
-    
-      if (user != null) {
-      // Signed in - show logout confirmation
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Sign Out'),
-          content: const Text('Proceed to logout?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _saveSessionToFirebase().then((_) {
-                  _authService.signOut().then((_) {
-                    setState(() {
-                      _messages.clear();
-                      _sessionHistory.clear();
-                    });
-                    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => LoginScreen()));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Signed out successfully')),
-                    );
-                  });
-                });
-              },
-              child: const Text('Proceed to Logout', style: TextStyle(color: Colors.red)),
-            ),
-          ],
+    final isGuest = user == null || user.isAnonymous;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => ResponsiveAuthDialog(
+        title: const Text('Logout?'),
+        content: Text(
+          isGuest
+              ? 'Log in or register to retain your session history before leaving.'
+              : 'Your saved history will remain on your account. '
+                  'Log in again anytime to continue your journey.\n\n'
+                  'Are you sure you want to log out?',
         ),
-      );
-    } else {
-      // Not signed in - show Save Journey prompt
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Save Your Journey'),
-          content: const Text('Sign up or log in to save your history, Sharing My Gifts plan, and continue your spiritual journey across sessions.'),
+        actions: AuthDialogActions(
           actions: [
+            if (isGuest)
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  showAuthModal(context, ref);
+                },
+                child: const Text('Log in / Register'),
+              ),
             TextButton(
               onPressed: () {
-                Navigator.pop(context);
-                Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => LoginScreen()));
+                Navigator.pop(ctx);
+                _resetToBlankHomeScreen();
+                _performLogout();
               },
-              child: const Text('Sign Up / Log In'),
+              child: const Text(
+                'Continue to Log out',
+                style: TextStyle(color: Colors.red),
+              ),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancel'),
             ),
           ],
         ),
-      );
+      ),
+    );
+  }
+
+  /// Clears chat UI immediately — used on logout before and after auth completes.
+  void _resetToBlankHomeScreen() {
+    _controller.clear();
+    _lastExtractedActions = [];
+    _selectedSpiritualTopic = null;
+    _isSending = false;
+    _scaffoldKey.currentState?.closeDrawer();
+
+    if (!mounted) return;
+    setState(() {
+      _messages.clear();
+      _messages.add(_welcomeMessage());
+    });
+    _scrollToTop();
+  }
+
+  /// Sign out, clear local session, start fresh anonymous guest, return to welcome state.
+  Future<void> _performLogout() async {
+    final user = _authService.currentUser;
+    final isRegistered = user != null && !user.isAnonymous;
+
+    if (isRegistered) {
+      try {
+        await _saveSessionToFirebase();
+      } catch (e) {
+        debugPrint('Pre-logout save: $e');
+      }
     }
+
+    try {
+      await ref.read(sessionHistoryProvider.notifier).clearSessionForLogout();
+      await ref.read(authCoordinatorProvider).signOut();
+      await ref.read(sessionHistoryProvider.notifier).clearSessionForLogout();
+      await ref.read(authCoordinatorProvider).continueAsGuest();
+      await ref.read(sessionHistoryProvider.notifier).clearSessionForLogout();
+    } catch (e) {
+      debugPrint('Logout error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Logout failed: $e')),
+        );
+      }
+      return;
+    }
+
+    _hasShownWelcome = false;
+    ref.read(homeRefreshKeyProvider.notifier).state++;
   }
 
   void _showTermsAndPrivacy() {
-    setState(() {
+      setState(() {
       _messages.clear();
-      _messages.add(_ChatMessage(
-        isUser: false,
-        text: "**Terms & Privacy**\n\n"
+      _messages.add(_staticPrompt(
+        "**Terms & Privacy**\n\n"
             "This app is a formation aid aligned with the Magisterium of the Catholic Church.\n\n"
             "It is not a substitute for the Sacraments or spiritual direction. For serious matters, consult your priest.",
-      ));
+       ));
     });
     _scrollToTop();
   }
@@ -464,7 +678,7 @@ void _loadSeekingGodsWisdomScreen() {
 
     setState(() {
       _messages.clear();
-      _messages.add(_ChatMessage(
+      _messages.add(ChatMessage(
         isUser: false,
         text: '',
         isSpiritualNourishment: true,
@@ -480,6 +694,49 @@ void _loadSeekingGodsWisdomScreen() {
         _scrollController.jumpTo(0.0);
       }
     });
+  }
+
+  bool _hasConversationMessages() =>
+      _messages.any((m) => m.isUser && !m.isStaticPrompt && m.text.isNotEmpty);
+
+  /// After history load, scroll to the newest Q&A so the sticky header matches the view.
+  void _scrollToLatestConversation() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (!mounted || !_scrollController.hasClients) return;
+
+        if (!_hasConversationMessages()) {
+          _scrollToTop();
+          return;
+        }
+
+        final anchor = _latestMessageKey.currentContext;
+        if (anchor != null) {
+          Scrollable.ensureVisible(
+            anchor,
+            alignment: 0.05,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutCubic,
+          );
+          return;
+        }
+
+        final max = _scrollController.position.maxScrollExtent;
+        _scrollController.animateTo(
+          max,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+        );
+      });
+    });
+  }
+
+  void _scrollAfterMessagesUpdated({required bool scrollToLatest}) {
+    if (scrollToLatest) {
+      _scrollToLatestConversation();
+    } else {
+      _scrollToTop();
+    }
   }
 
   void _scrollToLoading() {
@@ -504,101 +761,16 @@ void _loadSeekingGodsWisdomScreen() {
     });
   }
 
-void _handleLogout() async {
-  final authService = AuthService();
-  await authService.signOut();
-  
-  _hasShownWelcome = false;
-
-  // Do NOT clear _sessionHistory here — we want to keep it for the session
-
-  showDialog(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Save Your Journey'),
-      content: const Text(
-        'Sign up or log in to save your history, Sharing My Gifts plan, and continue your spiritual journey across sessions.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.pop(context);
-            showAuthModal(context);
-          },
-          child: const Text('Sign Up / Log In'),
-        ),
-      ],
-    ),
-  );
-}
-
   void _removeLoadingMessageIfPresent() {
     _messages.removeWhere((m) => m.isLoading);
   }
 
-  void _toggleListening() async {
-    if (isWeb) {
-      // Check for iOS PWA
-      final isIOSPWA = html.window.navigator.userAgent.contains("iPhone") || 
-                       html.window.navigator.userAgent.contains("iPad");
-      if (isIOSPWA) {
-        // Enable speech for iOS PWA
-        // (add the iOS code here or call the native speech)
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Voice input available on iPhone app')),
-        );
-        return;
-      }
-    }
-
-    if (_isListening) {
-      await speech.stop();
-      setState(() => _isListening = false);
-      print("DEBUG: Stopped listening");
-    } else {
-      bool available = await speech.initialize(
-        onStatus: (status) => print("DEBUG: Speech status: $status"),
-      );
-      print("DEBUG: Speech available: $available");
-      if (available) {
-        setState(() => _isListening = true);
-        speech.listen(
-          onResult: (result) {
-            print("DEBUG: Recognized: ${result.recognizedWords}");
-            setState(() {
-              _controller.text = result.recognizedWords;
-            });
-          },
-          localeId: "en_US",
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Speech recognition not available')),
-        );
-      }
-    }
+  Future<void> _toggleListening() async {
+    await _voiceService.toggleListening();
   }
-  
-  void _speak(String text) async {
-    // Remove URLs and links
-    String cleanText = text.replaceAll(RegExp(r'http[s]?://[^\s]+'), '');
-    cleanText = cleanText.replaceAll(RegExp(r'\[.*?\]\(.*?\)'), '');   // Remove Markdown links
 
-    await flutterTts.setLanguage("en-US");
-    await flutterTts.setPitch(0.75);     // Deeper pitch
-    await flutterTts.setSpeechRate(0.8);   // Slower for natural sound
-    await flutterTts.setVolume(1.0);
-    
-    // Try deep male voices
-    await flutterTts.setVoice({"name": "Daniel", "locale": "en-US"});   // Deep option
-    // Or try "Tom", "Fred", "Alex"
-
-    await flutterTts.speak(cleanText);
+  Future<void> _speak(String text) async {
+    await _voiceService.speak(text);
   }
 
   Future<void> _handleSend() async {
@@ -606,8 +778,8 @@ void _handleLogout() async {
     if (text.isEmpty || _isSending) return;
 
     setState(() {
-      _messages.add(_ChatMessage(isUser: true, text: text));
-      _messages.add(_ChatMessage(isUser: false, text: '', isLoading: true));
+      _messages.add(ChatMessage(isUser: true, text: text));
+      _messages.add(ChatMessage(isUser: false, text: '', isLoading: true));
       _isSending = true;
     });
     _controller.clear();
@@ -651,72 +823,15 @@ void _handleLogout() async {
         "messages": [
           {
             "role": "system",
-            "content": """You are WWJD, a warm, faithful Catholic spiritual advisor.
-
-**CRITICAL LINK RULE — NON-NEGOTIABLE:**
-Only use these stable, official sources with direct paragraph links.
-Only use these exact, verified formats:
-- CCC: Use the exact paragraph link, e.g. https://www.vatican.va/content/catechism/en/part_three/section_two/chapter_two/article_7/ii_respect_for_persons_and_their_goods.html for CCC 2290
-- Bible: https://www.biblegateway.com/passage/?search=1%20Corinthians%206%3A9-10&version=NABRE
-- USCCB.org when appropriate
-If you are not 100% sure of the exact paragraph number and link, do not link — just reference the teaching by number (e.g. "as taught in CCC 2290").
-Never link to home pages or sites with known 404/certificate issues. 
-Always link to the exact paragraph or section.
-Never invent or guess links.
-
-**Bible Links:**
-- Use BibleGateway.com with this exact format: https://www.biblegateway.com/passage/?search=1%20Corinthians%206%3A9-10&version=NABRE
-- Always use proper URL encoding (%20 for space, %3A for colon).
-- Prefer NABRE or RSVCE versions.
-
-Current time: $greeting on ${DateFormat('EEEE').format(now)}.
-
-Respond in a natural, flowing style **without any numbering** (no 1., 2., 3., etc.). 
-Let each section transition smoothly as paragraphs and directly reference the user's specific situation.
-
-Core Structure to follow naturally:
-- Warm, personal welcome
-- Connection to the Two Great Commandments
-- What Would Jesus Do? (with Gospel example)
-- Mercy & Forgiveness
-- Practical Next Steps (use bullets where helpful)
-- Kingdom Challenge
-- Deeper Catholic Roots (Catechism, saints, etc.) + gentle closing
-
-**When referencing Scripture, CCC, saints, or documents, use accurate, current official URLs in Markdown format [Text](url) that point to the specific paragraph or section.**
-
-**CRITICAL FORMATTING RULE — NON-NEGOTIABLE:**
-After your final paragraph, output **ONLY** a valid JSON block wrapped in ```json ... ```. 
-Nothing else after the JSON block.
-
-The JSON must contain 2–3 concrete, distinct, actionable challenges suitable for "Sharing My Gifts".
-
-**FINAL OUTPUT RULE (MUST FOLLOW):**
-Always end your response with EXACTLY this and NOTHING after it:
-
-```json
-{
-  "suggestedActions": [
-    {
-      "title": "Title 1",
-      "description": "Actionable sentence",
-      "frequency": "Daily"
-    },
-    {
-      "title": "Title 2",
-      "description": "Actionable sentence",
-      "frequency": "Weekly"
-    }
-  ]
-}
-Absolute Rule: End your response with nothing but this exact JSON block wrapped in code fences. 
-Do not add any text after it.""",
-},
-{"role": "user", "content": userMessage}
-],
-"temperature": 0.78,
-"max_tokens": 1200,
-}),
+            "content": WwjdSystemPrompt.forChat(
+              timeContext: '$greeting on ${DateFormat('EEEE').format(now)}.',
+            ),
+          },
+          {"role": "user", "content": userMessage}
+        ],
+        "temperature": 0.78,
+        "max_tokens": 1200,
+      }),
 );
 if (response.statusCode == 200) {
   final data = jsonDecode(response.body);
@@ -726,14 +841,13 @@ if (response.statusCode == 200) {
 
   setState(() {
     _removeLoadingMessageIfPresent();
-    _messages.add(_ChatMessage(isUser: false, text: cleanText));
+    _messages.add(ChatMessage(isUser: false, text: cleanText));
     _isSending = false;
   });
   _scrollToNewResponse();
 
   // Save full conversation (user + AI)
-  _sessionHistory.clear();
-  _sessionHistory.addAll(List.from(_messages));
+  await _saveSessionToFirebase();
 } else {
   throw Exception('API Error: ${response.statusCode}');
 }
@@ -741,51 +855,30 @@ if (response.statusCode == 200) {
 print('API Error: $e');
 setState(() {
 _removeLoadingMessageIfPresent();
-_messages.add(_ChatMessage(
+_messages.add(ChatMessage(
 isUser: false,
 text: '⚠️ Live API Error:\n$e\n\nPlease check your xAI key in config.dart',
 ));
 _isSending = false;
 });
 _scrollToNewResponse();
-_sessionHistory.clear();
-_sessionHistory.addAll(List.from(_messages));
+await _saveSessionToFirebase();
 }
 }
 void _handleDelveDeeper() {
 _removeLoadingMessageIfPresent();
 setState(() {
-_messages.add(_ChatMessage(isUser: false, text: '', isLoading: true));
+_messages.add(ChatMessage(isUser: false, text: '', isLoading: true));
 _isSending = true;
 });
 _scrollToNewResponse();
 final lastUserMessage = _messages.lastWhere(
 (m) => m.isUser,
-orElse: () => _ChatMessage(isUser: true, text: "the current topic"),
+orElse: () => ChatMessage(isUser: true, text: "the current topic"),
 );
-final delvePrompt = """${lastUserMessage.text}
-DELVE DEEPER MODE
-Provide a much deeper Catholic exploration of the above topic. Expand with Scripture (BibleGateway links), CCC (Vatican.va links), saints, and practical applications. Be warm and pastoral.
-NON-NEGOTIABLE FORMATTING:
-
-Write your full, rich response first as normal paragraphs.
-After the very last sentence of your response, output EXACTLY this and nothing else:
-
-{
-  "suggestedActions": [
-    {
-      "title": "Short clear title 1",
-      "description": "One clear actionable sentence",
-      "frequency": "Daily"
-    },
-    {
-      "title": "Short clear title 2",
-      "description": "One clear actionable sentence",
-      "frequency": "Weekly"
-    }
-  ]
-}
-```""";
+final delvePrompt = WwjdSystemPrompt.forDelveDeeper(
+  userTopic: lastUserMessage.text,
+);
 
   _lastExtractedActions = [];
   _callLiveGrokAPI(delvePrompt);
@@ -807,7 +900,9 @@ After the very last sentence of your response, output EXACTLY this and nothing e
       final data = json.decode(jsonStr);
       final list = data['suggestedActions'] as List?;
       if (list != null && list.isNotEmpty) {
-        actions = list.map((e) => Map<String, String>.from(e)).toList();
+        actions = WwjdSystemPrompt.normalizeSuggestedActions(
+          list.map((e) => Map<String, dynamic>.from(e as Map)).toList(),
+        );
       }
     } catch (e) {
       print('JSON parse error: $e');
@@ -821,14 +916,15 @@ After the very last sentence of your response, output EXACTLY this and nothing e
       caseSensitive: false,
     ).allMatches(fullResponse);
 
-    actions = actionMatches.take(3).map((m) {
-      final text = m.group(0)!.trim();
-      return {
-        "title": text.length > 60 ? text.substring(0, 57) + "..." : text,
-        "description": text,
-        "frequency": "Daily"
-      };
-    }).toList();
+    actions = WwjdSystemPrompt.normalizeSuggestedActions(
+      actionMatches.take(3).map((m) {
+        final text = m.group(0)!.trim();
+        return {
+          'description': text,
+          'frequency': 'Daily',
+        };
+      }).toList(),
+    );
   }
 
   // Clean visible text (remove JSON)
@@ -844,11 +940,11 @@ After the very last sentence of your response, output EXACTLY this and nothing e
 }
 
   List<Map<String, String>> _extractSuggestedActions(String text) {
-    List<Map<String, String>> actions = [];
+    final raw = <Map<String, dynamic>>[];
 
     // Clean any JSON-like noise first
     String cleanedText = text.replaceAll(RegExp(r'```json[\s\S]*?```'), '')
-                           .replaceAll(RegExp(r'\{[\s\S]*?"suggestedActions"[\s\S]*?\}'), '');
+        .replaceAll(RegExp(r'\{[\s\S]*?"suggestedActions"[\s\S]*?\}'), '');
 
     // Extract bullet-style actions
     final RegExp actionRegExp = RegExp(
@@ -859,27 +955,31 @@ After the very last sentence of your response, output EXACTLY this and nothing e
     final matches = actionRegExp.allMatches(cleanedText);
 
     for (var match in matches) {
-      String title = match.group(1)?.trim() ?? '';
-      if (title.isEmpty || title.length < 8 || title.contains('"description"')) continue;
+      final description = match.group(1)?.trim() ?? '';
+      if (description.isEmpty ||
+          description.length < 8 ||
+          description.contains('"description"')) {
+        continue;
+      }
 
-      actions.add({
-        'title': title.length > 75 ? title.substring(0, 72) + '...' : title,
-        'description': title,
+      raw.add({
+        'description': description,
+        'frequency': 'Daily',
       });
     }
 
-    // Fallback
-    if (actions.isEmpty && cleanedText.isNotEmpty) {
-      String fallback = cleanedText.split('\n').first.trim();
-      if (fallback.length > 75) fallback = fallback.substring(0, 72) + '...';
-
-      actions.add({
-        'title': fallback,
-        'description': fallback,
-      });
+    // Fallback: first substantive line
+    if (raw.isEmpty && cleanedText.isNotEmpty) {
+      final fallback = cleanedText.split('\n').firstWhere(
+            (line) => line.trim().length >= 12,
+            orElse: () => cleanedText.split('\n').first.trim(),
+          );
+      if (fallback.isNotEmpty) {
+        raw.add({'description': fallback.trim(), 'frequency': 'Daily'});
+      }
     }
 
-    return actions;
+    return WwjdSystemPrompt.normalizeSuggestedActions(raw);
   }
 
   // Sidebar and other methods remain unchanged
@@ -936,11 +1036,14 @@ After the very last sentence of your response, output EXACTLY this and nothing e
   }
 
   Widget _sidebarTile(IconData icon, String label, VoidCallback onTap) {
-    return ListTile(
-      leading: Icon(icon, color: AppColors.primaryMaroon),
-      title: Text(label, style: const TextStyle(fontSize: 15)),
-      onTap: onTap,
-      dense: true,
+    return Material(                                   // ← added
+      color: Colors.transparent,
+      child: ListTile(
+        leading: Icon(icon, color: AppColors.primaryMaroon),
+        title: Text(label, style: const TextStyle(fontSize: 15)),
+        onTap: onTap,
+        dense: true,
+      ),
     );
   }
 
@@ -961,7 +1064,7 @@ After the very last sentence of your response, output EXACTLY this and nothing e
   }
 
   void _shareMessage(String text) {
-    Share.share(text);
+    SharePlus.instance.share(ShareParams(text: text));
   }
 
     @override
@@ -969,6 +1072,7 @@ After the very last sentence of your response, output EXACTLY this and nothing e
     final isWide = MediaQuery.of(context).size.width >= kDesktopBreakpoint;
 
       return Scaffold(
+      key: _scaffoldKey,
       appBar: _buildAppBar(isWide),
       drawer: isWide ? null : Drawer(child: _buildSidebar(isInDrawer: true)),
       body: LayoutBuilder(
@@ -985,7 +1089,7 @@ After the very last sentence of your response, output EXACTLY this and nothing e
                               builder: (context) {
                                 final latestUserMessage = _messages.lastWhere(
                                   (m) => m.isUser,
-                                  orElse: () => _ChatMessage(isUser: true, text: ''),
+                                  orElse: () => ChatMessage(isUser: true, text: ''),
                                 );
                                 if (latestUserMessage.text.isNotEmpty) {
                                   return Container(
@@ -1032,57 +1136,78 @@ After the very last sentence of your response, output EXACTLY this and nothing e
   }
 
   PreferredSizeWidget _buildAppBar(bool isWide) {
+    final compact = isCompactWidth(context);
+    final barHeight = compact ? 56.0 : 90.0;
+
     return PreferredSize(
-      preferredSize: const Size.fromHeight(90),
+      preferredSize: Size.fromHeight(barHeight),
       child: Container(
-        height: 90,
+        height: barHeight,
         decoration: const BoxDecoration(
           color: Color(0xFF8B1E1E),
           boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
         ),
         child: SafeArea(
+          bottom: false,
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Centered branding
+              if (!isWide)
+                IconButton(
+                  icon: const Icon(Icons.menu, color: Colors.white),
+                  tooltip: 'Open menu',
+                  onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                ),
               Expanded(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.church, size: 36, color: Colors.white),
-                    const SizedBox(width: 12),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(AppConfig.appName, 
-                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-                        Text(AppConfig.tagline, 
-                          style: const TextStyle(fontSize: 12, color: Colors.white70)),
-                      ],
-                    ),
-                    const SizedBox(width: 16),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.asset(
-                        'assets/images/wwjd_header.jpg',
-                        height: 58,
-                        width: 58,
-                        fit: BoxFit.cover,
+                    Icon(Icons.church, size: compact ? 28 : 36, color: Colors.white),
+                    SizedBox(width: compact ? 8 : 12),
+                    Flexible(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            compact ? 'WWJD' : AppConfig.appName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: compact ? 18 : 24,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          if (!compact)
+                            Text(
+                              AppConfig.tagline,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11, color: Colors.white70),
+                            ),
+                        ],
                       ),
                     ),
+                    if (!compact) ...[
+                      const SizedBox(width: 12),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.asset(
+                          'assets/images/wwjd_header.jpg',
+                          height: 58,
+                          width: 58,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
-
-              // Right side - Logout button
-              Padding(
-                padding: const EdgeInsets.only(right: 16),
-                child: IconButton(
-                  icon: const Icon(Icons.logout, color: Colors.white),
-                  onPressed: _showAuthModal,
-                ),
+              IconButton(
+                icon: const Icon(Icons.logout, color: Colors.white),
+                tooltip: 'Log out',
+                onPressed: _confirmLogout,
               ),
             ],
           ),
@@ -1105,7 +1230,7 @@ After the very last sentence of your response, output EXACTLY this and nothing e
     );
   }
 
- Widget _buildMessageBubble(_ChatMessage msg, int index) {
+ Widget _buildMessageBubble(ChatMessage msg, int index) {
     final isUser = msg.isUser;
     final isLatestAI = !isUser && index == _messages.length - 1;   // Add this line
 
@@ -1159,39 +1284,9 @@ After the very last sentence of your response, output EXACTLY this and nothing e
 
                         // Action buttons for AI responses only
                         // Action buttons for AI responses only
-            if (!isUser && !msg.isLoading && !msg.isSpiritualNourishment && !msg.isStructuredSample) ...[
+            if (msg.showsConversationActions) ...[
               const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton.icon(
-                    onPressed: _handleDelveDeeper,
-                    icon: const Icon(Icons.expand_more, size: 18),
-                    label: const Text('Delve Deeper'),
-                    style: TextButton.styleFrom(foregroundColor: AppColors.primaryMaroon),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.copy, size: 19),
-                    onPressed: () => _copyToClipboard(msg.text),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.volume_up, size: 19),
-                    onPressed: () => _speak(msg.text),
-                  ),
-                  // Central Share Button
-                  ShareButton(
-                    question: _getLatestUserQuestion(),
-                    response: msg.text,
-                  ),
-                  TextButton.icon(
-                    icon: const Icon(Icons.card_giftcard, size: 18),
-                    label: const Text('Add to My Gifts Plan'),
-                    onPressed: () => _addToGiftsPlan(msg),
-                    style: TextButton.styleFrom(foregroundColor: AppColors.primaryMaroon),
-                  ),
-                ],
-              ),
+              _buildConversationActions(msg),
             ],
           ],
         ),
@@ -1199,47 +1294,138 @@ After the very last sentence of your response, output EXACTLY this and nothing e
     );
   }
 
-  Widget _buildInputBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
-      decoration: BoxDecoration(
-        color: AppColors.parchment,
-        border: Border(top: BorderSide(color: AppColors.primaryMaroon.withValues(alpha: 0.1))),
-      ),
-      child: Row(
+  Widget _buildConversationActions(ChatMessage msg) {
+    final compact = isCompactWidth(context);
+    final maroon = TextButton.styleFrom(foregroundColor: AppColors.primaryMaroon);
+
+    if (compact) {
+      return Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 2,
+        runSpacing: 2,
         children: [
           IconButton(
-            icon: Icon(_isListening ? Icons.mic_off : Icons.mic),
-            onPressed: _toggleListening,
+            tooltip: 'Delve Deeper',
+            icon: const Icon(Icons.expand_more, size: 22),
+            onPressed: _handleDelveDeeper,
+            color: AppColors.primaryMaroon,
           ),
-          Expanded(
-            child: TextField(
-              controller: _controller,
-              maxLines: 4,
-              minLines: 1,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => _handleSend(),
-              decoration: const InputDecoration(
-                hintText: 'Bring your question or struggle… we walk together',
-              ),
-            ),
+          IconButton(
+            tooltip: 'Copy',
+            icon: const Icon(Icons.copy_outlined, size: 21),
+            onPressed: () => _copyToClipboard(msg.text),
           ),
-          const SizedBox(width: 10),
-          InkWell(
-            onTap: _isSending ? null : _handleSend,
-            child: Container(
-              width: kSendButtonSize,
-              height: kSendButtonSize,
-              decoration: BoxDecoration(
-                color: AppColors.primaryMaroon,
-                borderRadius: BorderRadius.circular(28),
-              ),
-              child: _isSending
-                  ? const CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)
-                  : const Icon(Icons.send, color: Colors.white),
-            ),
+          IconButton(
+            tooltip: 'Listen',
+            icon: const Icon(Icons.volume_up_outlined, size: 21),
+            onPressed: () => _speak(msg.text),
+          ),
+          ShareButton(
+            question: _getLatestUserQuestion(),
+            response: msg.text,
+          ),
+          IconButton(
+            tooltip: 'Add to My Gifts Plan',
+            icon: const Icon(Icons.card_giftcard_outlined, size: 21),
+            onPressed: () => _addToGiftsPlan(msg),
+            color: AppColors.primaryMaroon,
           ),
         ],
+      );
+    }
+
+    return Wrap(
+      alignment: WrapAlignment.end,
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        TextButton.icon(
+          onPressed: _handleDelveDeeper,
+          icon: const Icon(Icons.expand_more, size: 18),
+          label: const Text('Delve Deeper'),
+          style: maroon,
+        ),
+        IconButton(
+          tooltip: 'Copy',
+          icon: const Icon(Icons.copy, size: 19),
+          onPressed: () => _copyToClipboard(msg.text),
+        ),
+        IconButton(
+          tooltip: 'Listen',
+          icon: const Icon(Icons.volume_up, size: 19),
+          onPressed: () => _speak(msg.text),
+        ),
+        ShareButton(
+          question: _getLatestUserQuestion(),
+          response: msg.text,
+        ),
+        TextButton.icon(
+          icon: const Icon(Icons.card_giftcard, size: 18),
+          label: const Text('Add to My Gifts Plan'),
+          onPressed: () => _addToGiftsPlan(msg),
+          style: maroon,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInputBar() {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final horizontal = responsiveHorizontalPadding(context);
+
+    return SafeArea(
+      top: false,
+      child: AnimatedPadding(
+        duration: const Duration(milliseconds: 150),
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: Container(
+          padding: horizontal.copyWith(top: 8, bottom: 10),
+          decoration: BoxDecoration(
+            color: AppColors.parchment,
+            border: Border(top: BorderSide(color: AppColors.primaryMaroon.withValues(alpha: 0.1))),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              IconButton(
+                icon: Icon(_isListening ? Icons.mic_off : Icons.mic),
+                tooltip: _isListening ? 'Stop listening' : 'Voice input',
+                onPressed: _toggleListening,
+              ),
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  maxLines: 4,
+                  minLines: 1,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _handleSend(),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: isCompactWidth(context)
+                        ? 'Your question…'
+                        : 'Bring your question or struggle… we walk together',
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              InkWell(
+                onTap: _isSending ? null : _handleSend,
+                child: Container(
+                  width: kSendButtonSize,
+                  height: kSendButtonSize,
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryMaroon,
+                    borderRadius: BorderRadius.circular(28),
+                  ),
+                  child: _isSending
+                      ? const CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)
+                      : const Icon(Icons.send, color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1270,52 +1456,6 @@ After the very last sentence of your response, output EXACTLY this and nothing e
           ),
         ],
       ),
-    );
-  }
-}
-
-// ==================== MODELS DEFINED OUTSIDE THE STATE CLASS ====================
-
-class _ChatMessage {
-  final bool isUser;
-  final String text;
-  final bool isStructuredSample;
-  final bool isLoading;
-  final bool isSpiritualNourishment;
-  bool isShared = false;
-  DateTime? sharedAt;
-
-  _ChatMessage({
-    required this.isUser,
-    required this.text,
-    this.isStructuredSample = false,
-    this.isLoading = false,
-    this.isSpiritualNourishment = false,
-    this.isShared = false,
-    this.sharedAt,
-  });
-
-  Map<String, dynamic> toMap() {
-    return {
-      'isUser': isUser,
-      'text': text,
-      'isStructuredSample': isStructuredSample,
-      'isLoading': isLoading,
-      'isSpiritualNourishment': isSpiritualNourishment,
-      'isShared': isShared,
-      'sharedAt': sharedAt?.toIso8601String(),
-    };
-  }
-
-  static _ChatMessage fromMap(Map<String, dynamic> map) {
-    return _ChatMessage(
-      isUser: map['isUser'] ?? false,
-      text: map['text'] ?? '',
-      isStructuredSample: map['isStructuredSample'] ?? false,
-      isLoading: map['isLoading'] ?? false,
-      isSpiritualNourishment: map['isSpiritualNourishment'] ?? false,
-      isShared: map['isShared'] ?? false,
-      sharedAt: map['sharedAt'] != null ? DateTime.parse(map['sharedAt']) : null,
     );
   }
 }
@@ -1353,24 +1493,6 @@ class _StructuredWWJDResponse extends StatelessWidget {
           onPressed: onDelveDeeper,
           icon: const Icon(Icons.menu_book_outlined),
           label: const Text('Delve Deeper'),
-        ),
-      ],
-    );
-  }
-}
-// Simple Auth Modal
-class AuthModal extends StatelessWidget {
-  const AuthModal({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Account'),
-      content: const Text('Sign in / Register coming soon.\n\nUse Google or Email.'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Close'),
         ),
       ],
     );

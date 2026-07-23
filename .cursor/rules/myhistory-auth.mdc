@@ -1,0 +1,51 @@
+---
+description: Authentication and MyHistory persistence rules for WWJD app
+globs: lib/**/*.dart
+alwaysApply: false
+---
+
+# WWJD App Rules - MyHistory & Auth
+
+## Authentication & History Persistence
+
+- Use Firebase Auth (email, Google, Guest/Anonymous).
+- MyHistory must survive across sessions and devices where possible.
+- Guest sessions: Store history locally + anonymous Firestore.
+- On login/register:
+  - Migrate guest history to the new/existing user account.
+  - For existing users: Merge session data (deduplicate by timestamp/ID, preserve chronological order).
+- Prefer Riverpod for state, Firebase Firestore for backend.
+
+## Implementation expectations
+
+### Auth entry points
+- All auth paths (email sign-in, register, Google, anonymous) must call the same post-auth migration hook.
+- Guest = `signInAnonymously()` when possible, not merely “no user”.
+
+### Message schema
+Each history message must include stable `id` and `timestamp` for dedupe and sort:
+
+```dart
+{
+  'id': 'uuid-or-firestore-id',
+  'timestamp': Timestamp,
+  'isUser': true,
+  'text': '...',
+}
+```
+
+### Merge algorithm
+On login/register, merge guest + local + remote history:
+1. Load existing Firestore history for the signed-in user.
+2. Combine with guest/local messages.
+3. Deduplicate by `id` (fallback: `timestamp` + `text` hash).
+4. Sort ascending by `timestamp`.
+5. Persist merged list once, then clear guest-only local cache.
+
+### State management
+- Expose auth and history via Riverpod providers (not static widget state).
+- `HistoryService` / `AuthService` remain the Firestore/Auth layer; providers orchestrate load/save/merge.
+
+### Guest persistence
+- Write to local storage (e.g. SharedPreferences/Hive) on each message.
+- Mirror to anonymous Firestore under the anonymous UID when signed in anonymously.

@@ -1,0 +1,23 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local env / secrets (prefer env vars for API keys)
+.env
+.env.*
+
+# Cursor local MCP (machine-specific)
+cursor/

@@ -5,4 +5,8 @@
   
   static const String appName = 'WWJD - DI';
   static const String tagline = 'Sharing the Divine Intelligence of Scripture and the Revelation of the Catholic Church';
+
+  /// Production web origin for share links (e.g. https://app.example.com).
+  /// When null, web uses [Uri.base.origin] at runtime.
+  static const String? webBaseUrl = null;
 }

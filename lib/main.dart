@@ -1,35 +1,50 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 
 import 'core/config.dart';
 import 'core/app_colors.dart';
-import 'screens/home_screen.dart';
+import 'core/routing/app_router.dart';
 import 'firebase_options.dart';
+import 'package:go_router/go_router.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  if (kIsWeb) {
+    usePathUrlStrategy();
+  }
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  runApp(const WWJDApp());
+  if (kIsWeb) {
+    await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
+  }
+
+  runApp(
+    const ProviderScope(
+      child: WWJDApp(),
+    ),
+  );
 }
 
-class WWJDApp extends StatelessWidget {
+class WWJDApp extends ConsumerWidget {
   const WWJDApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(_routerProvider);
+
+    return MaterialApp.router(
       title: AppConfig.appName,
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
-      initialRoute: '/home',
-      routes: {
-        '/home': (context) => const HomeScreen(),
-      },
-      home: const HomeScreen(),
+      routerConfig: router,
     );
   }
 
@@ -76,3 +91,5 @@ class WWJDApp extends StatelessWidget {
     );
   }
 }
+
+final _routerProvider = Provider<GoRouter>((ref) => createAppRouter(ref));

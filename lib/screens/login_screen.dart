@@ -1,35 +1,42 @@
 import 'package:flutter/material.dart';
-import '../core/auth/auth_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'home_screen.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-class LoginScreen extends StatefulWidget {
+import '../core/providers/app_providers.dart';
+import '../core/auth/auth_service.dart';
+import '../widgets/auth_layout.dart';
+
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  final AuthService _authService = AuthService();
+class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _isRegisterMode = false;
 
-  Future<void> _signInWithEmail() async {
+  Future<void> _completeAuth(Future<AuthMigrationResult> Function() action) async {
     setState(() => _isLoading = true);
     try {
-      final user = await _authService.signInWithEmail(
-        _emailController.text.trim(),
-        _passwordController.text.trim(),
-      );
-      if (user != null && mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
+      final result = await action();
+
+      if (!mounted) return;
+      showMigrationSnackBar(context, result);
+      Navigator.pushReplacementNamed(context, '/home');
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message ?? 'Authentication failed')),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${e.toString()}')),
+          SnackBar(content: Text('Error: $e')),
         );
       }
     } finally {
@@ -37,24 +44,53 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _submitEmail() async {
+    final coordinator = ref.read(authCoordinatorProvider);
+    final inMemory = ref.read(sessionHistoryProvider.notifier).current;
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (_isRegisterMode) {
+      await _completeAuth(() => coordinator.registerWithEmail(
+            email: email,
+            password: password,
+            inMemoryHistory: inMemory,
+          ));
+    } else {
+      await _completeAuth(() => coordinator.signInWithEmail(
+            email: email,
+            password: password,
+            inMemoryHistory: inMemory,
+          ));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: kAuthFormMaxWidth),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
               const Icon(Icons.church, size: 80, color: Colors.brown),
               const SizedBox(height: 24),
               const Text(
                 'WWJD',
+                textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold),
               ),
-              const Text('What Would Jesus Do?', style: TextStyle(fontSize: 18)),
+              const Text(
+                'What Would Jesus Do?',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 18),
+              ),
               const SizedBox(height: 60),
-
               TextField(
                 controller: _emailController,
                 decoration: const InputDecoration(
@@ -64,7 +100,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 keyboardType: TextInputType.emailAddress,
               ),
               const SizedBox(height: 16),
-
               TextField(
                 controller: _passwordController,
                 decoration: const InputDecoration(
@@ -74,40 +109,71 @@ class _LoginScreenState extends State<LoginScreen> {
                 obscureText: true,
               ),
               const SizedBox(height: 24),
-
-              ElevatedButton(
-                onPressed: _isLoading ? null : _signInWithEmail,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
+              SizedBox(
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _submitEmail,
+                  child: _isLoading
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(color: Colors.white),
+                        )
+                      : Text(_isRegisterMode ? 'Register' : 'Sign In'),
                 ),
-                child: _isLoading
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('Sign In'),
               ),
-
               const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () async {
-                  setState(() => _isLoading = true);
-                  final user = await _authService.signInWithGoogle();
-                  if (user != null && mounted) {
-                    Navigator.pushReplacementNamed(context, '/home');
-                  }
-                  if (mounted) setState(() => _isLoading = false);
-                },
-                icon: const Icon(Icons.g_mobiledata),
-                label: const Text('Sign in with Google'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              SizedBox(
+                height: 48,
+                child: OutlinedButton(
+                  onPressed: _isLoading
+                      ? null
+                      : () async {
+                          final coordinator = ref.read(authCoordinatorProvider);
+                          final inMemory =
+                              ref.read(sessionHistoryProvider.notifier).current;
+                          await _completeAuth(() => coordinator.signInWithGoogle(
+                                inMemoryHistory: inMemory,
+                              ));
+                        },
+                  child: const Text('Sign in with Google'),
                 ),
               ),
-
               const SizedBox(height: 16),
               TextButton(
-                onPressed: () => Navigator.pushReplacementNamed(context, '/home'),
+                onPressed: _isLoading
+                    ? null
+                    : () => setState(() => _isRegisterMode = !_isRegisterMode),
+                child: Text(
+                  _isRegisterMode
+                      ? 'Already have an account? Sign in'
+                      : 'Need an account? Register',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              TextButton(
+                onPressed: _isLoading
+                    ? null
+                    : () async {
+                        try {
+                          await ref.read(authCoordinatorProvider).continueAsGuest();
+                          await ref.read(sessionHistoryProvider.notifier).initialize();
+                          if (mounted) {
+                            Navigator.pushReplacementNamed(context, '/home');
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Guest session error: $e')),
+                            );
+                          }
+                        }
+                      },
                 child: const Text('Continue as Guest'),
               ),
-            ],
+                ],
+              ),
+            ),
           ),
         ),
       ),

@@ -10,24 +10,29 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter
   http: ^1.6.0
   intl: ^0.20.2
-  share_plus: ^10.0.0
+  share_plus: ^13.2.1
+  go_router: ^14.8.1
   flutter_markdown: ^0.6.18
   url_launcher: ^6.3.0
   uuid: ^4.5.1
+  flutter_riverpod: ^2.6.1
+  shared_preferences: ^2.5.3
   
   # Firebase (updated versions)
-  firebase_core: ^3.6.0
-  firebase_auth: ^5.3.1
-  cloud_firestore: ^5.4.4
+  firebase_core: ^4.12.1
+  firebase_auth: ^6.5.6
+  cloud_firestore: ^6.7.1
   
   # Speech & TTS (keep)
-  speech_to_text: ^6.6.0
+  speech_to_text: ^7.4.0
   flutter_tts: ^4.0.2
   
   # Google Sign-In (keep)
-  google_sign_in: ^6.2.1
+  google_sign_in: ^7.2.0
 
 dev_dependencies:
   flutter_lints: ^6.0.0
