@@ -1,5 +1,8 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+
 import '../core/app_colors.dart';
+import 'linked_markdown_body.dart';
 
 class SpiritualNourishmentSection extends StatefulWidget {
   final String? initialTopic;
@@ -81,6 +84,25 @@ A simple structured approach:
 This daily habit builds self-awareness, fosters gratitude, and opens our hearts to continual conversion. Over time, it becomes a powerful tool for growth in virtue and intimacy with the Lord.
 ''',
     },
+    'ai_teaching': {
+      'title': 'Church Teaching on Artificial Intelligence',
+      'subtitle': 'Technology in the Service of Human Dignity',
+      'body': '''
+The Church teaches that every technology must serve the dignity of the human person, who is created in the image of God. Artificial intelligence is a powerful tool, but it remains only a tool. It cannot possess a conscience, offer authentic love, or replace the human heart's capacity to discern good from evil in relationship with God and neighbor.
+
+Pope Leo XIV's encyclical *Magnifica Humanitas* (2026) calls us to safeguard the human person in the age of AI. Technology should never become a new Tower of Babel that seeks power without reference to God. Instead, it must help us build a civilization of love, where human freedom, responsibility, and the common good remain central.
+
+[Read Magnifica Humanitas](https://www.vatican.va/content/leo-xiv/en/encyclicals/documents/20260515-magnifica-humanitas.html)
+
+**Using WWJD-DI rightly**
+
+WWJD-DI is offered as a companion for prayerful discernment, not as a substitute for your own conscience, the sacraments, or the guidance of the Church. Bring your real questions and struggles. Listen carefully to the light of Scripture and Catholic teaching that is presented. Then take what is helpful into prayer, examine it before the Lord, and act with freedom and responsibility.
+
+At the same time, WWJD-DI is meant to be more than private reflection. It is a vehicle for living the Two Great Commandments—loving God and loving our neighbor. Through Sharing My Gifts, Kingdom Challenges, and Walk Together, the app invites you to turn insight into concrete acts of service and to encourage others on the same path. In this way it supports the building of a living faith community: a place where believers can share what God is doing in their lives, offer mutual support, and help one another grow in holiness and charity.
+
+Let the app support your growth in faith and your call to serve others; never let it replace your personal relationship with Jesus Christ or the living community of the Church.
+''',
+    },
   };
 
   @override
@@ -124,9 +146,23 @@ This daily habit builds self-awareness, fosters gratitude, and opens our hearts 
                   Text(topic['title']!, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
                   Text(topic['subtitle']!, style: TextStyle(fontSize: 17, color: AppColors.primaryMaroon)),
                   const SizedBox(height: 24),
-                  SelectableText(
-                    topic['body']!,
-                    style: const TextStyle(fontSize: 16.5, height: 1.7),
+                  LinkedMarkdownBody(
+                    data: topic['body']!,
+                    styleSheet: MarkdownStyleSheet(
+                      p: const TextStyle(fontSize: 16.5, height: 1.7),
+                      strong: const TextStyle(
+                        fontSize: 16.5,
+                        height: 1.7,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      a: const TextStyle(
+                        fontSize: 16.5,
+                        height: 1.7,
+                        color: AppColors.primaryMaroon,
+                        decoration: TextDecoration.underline,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ],
               ),

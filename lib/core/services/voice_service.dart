@@ -1,20 +1,12 @@
-import 'package:flutter/foundation.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
-/// Speech-to-text and text-to-speech for Seeking God's Wisdom.
+/// Speech-to-text (dictation) for Seeking God's Wisdom — independent of read-aloud TTS.
 class VoiceService {
-  VoiceService({
-    SpeechToText? speech,
-    FlutterTts? tts,
-  })  : _speech = speech ?? SpeechToText(),
-        _tts = tts ?? FlutterTts();
+  VoiceService({SpeechToText? speech}) : _speech = speech ?? SpeechToText();
 
   final SpeechToText _speech;
-  final FlutterTts _tts;
 
   bool _speechReady = false;
-  bool _ttsReady = false;
 
   void Function(String text)? _onPartialText;
   void Function(bool listening)? _onListeningChanged;
@@ -31,6 +23,12 @@ class VoiceService {
     _onPartialText = onPartialText;
     _onListeningChanged = onListeningChanged;
     _onError = onError;
+    await _ensureSpeechReady();
+  }
+
+  /// Re-initializes dictation if the engine was reset (e.g. after TTS reconfiguration).
+  Future<void> _ensureSpeechReady() async {
+    if (_speechReady) return;
 
     _speechReady = await _speech.initialize(
       onStatus: (status) {
@@ -44,59 +42,14 @@ class VoiceService {
         _onError?.call(_friendlySpeechError(error.errorMsg));
       },
     );
-
-    try {
-      await _tts.awaitSpeakCompletion(true);
-      await _tts.setLanguage('en-US');
-      await _tts.setSpeechRate(0.85);
-      await _tts.setPitch(0.9);
-      await _tts.setVolume(1.0);
-      await _pickBestVoice();
-      _ttsReady = true;
-    } catch (e) {
-      debugPrint('VoiceService TTS init error: $e');
-      _ttsReady = kIsWeb; // Web may still speak with defaults
-    }
-  }
-
-  Future<void> _pickBestVoice() async {
-    try {
-      final dynamic rawVoices = await _tts.getVoices;
-      if (rawVoices is! List || rawVoices.isEmpty) return;
-
-      Map<String, String>? selected;
-      for (final entry in rawVoices) {
-        if (entry is! Map) continue;
-        final name = entry['name']?.toString() ?? '';
-        final locale = entry['locale']?.toString() ?? '';
-        if (!locale.toLowerCase().startsWith('en')) continue;
-
-        selected ??= {'name': name, 'locale': locale};
-
-        final lower = name.toLowerCase();
-        if (lower.contains('daniel') ||
-            lower.contains('david') ||
-            lower.contains('james') ||
-            lower.contains('male')) {
-          selected = {'name': name, 'locale': locale};
-          break;
-        }
-      }
-
-      if (selected != null) {
-        await _tts.setVoice(selected);
-      }
-    } catch (e) {
-      debugPrint('VoiceService voice selection skipped: $e');
-    }
   }
 
   Future<void> toggleListening() async {
+    await _ensureSpeechReady();
+
     if (!_speechReady) {
       _onError?.call(
-        kIsWeb
-            ? 'Voice input requires a browser that supports the Web Speech API (e.g. Chrome or Edge).'
-            : 'Speech recognition is not available. Check microphone permissions.',
+        'Speech recognition is not available. Check microphone permissions.',
       );
       return;
     }
@@ -125,35 +78,9 @@ class VoiceService {
       _onListeningChanged?.call(true);
     } catch (e) {
       _onListeningChanged?.call(false);
+      _speechReady = false;
       _onError?.call('Could not start listening: $e');
     }
-  }
-
-  Future<void> speak(String text) async {
-    if (!_ttsReady) {
-      _onError?.call('Read-aloud is not available on this device.');
-      return;
-    }
-
-    final clean = _cleanForTts(text);
-    if (clean.isEmpty) return;
-
-    try {
-      await _tts.stop();
-      await _tts.speak(clean);
-    } catch (e) {
-      _onError?.call('Unable to read aloud.');
-      debugPrint('VoiceService speak error: $e');
-    }
-  }
-
-  String _cleanForTts(String text) {
-    return text
-        .replaceAll(RegExp(r'http[s]?://[^\s]+'), '')
-        .replaceAll(RegExp(r'\[([^\]]+)\]\([^)]+\)'), r'$1')
-        .replaceAll(RegExp(r'[#*_`>]'), '')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
   }
 
   String _friendlySpeechError(String message) {
@@ -170,6 +97,5 @@ class VoiceService {
     if (_speech.isListening) {
       await _speech.stop();
     }
-    await _tts.stop();
   }
 }

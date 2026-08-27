@@ -1,0 +1,30 @@
+﻿# Cursor AI ignore — keep secrets out of model context (see .gitignore for Git).
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Keys and credential stores
+*.key
+*.pem
+*.p12
+secrets/
+credentials/
+
+# Local override config
+**/config.local.dart
+
+# Firebase client config (contains apiKey values)
+lib/firebase_options.dart
+
+# Local / service-account files
+**/*.local.yaml
+**/*.local.json
+**/serviceAccount*.json
+**/firebase-adminsdk*.json
+**/google-services.local.json
+**/GoogleService-Info.local.plist
+
+# Machine-specific Cursor MCP config
+cursor/

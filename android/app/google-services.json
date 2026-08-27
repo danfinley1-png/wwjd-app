@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "28066521495",
+    "project_id": "wwjd-di-e36ce",
+    "storage_bucket": "wwjd-di-e36ce.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:28066521495:android:2897b9f668922af97b64d2",
+        "android_client_info": {
+          "package_name": "com.example.wwjd_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD7a8J7ViDCeBZUjsm6YnZLVu6KeAMSHQI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

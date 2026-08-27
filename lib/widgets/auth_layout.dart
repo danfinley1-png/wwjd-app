@@ -76,9 +76,21 @@ class ResponsiveAuthDialog extends StatelessWidget {
   final Widget content;
   final Widget? actions;
 
+  List<Widget>? get _actionWidgets {
+    final widget = actions;
+    if (widget is AuthDialogActions) return widget.actions;
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final compact = isCompactWidth(context);
+    final dialogWidth = responsiveDialogMaxWidth(context);
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+    final maxBodyHeight = MediaQuery.sizeOf(context).height -
+        viewInsets.bottom -
+        (compact ? 120 : 140);
+    final actionWidgets = _actionWidgets;
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -87,21 +99,25 @@ class ResponsiveAuthDialog extends StatelessWidget {
         vertical: compact ? 16 : 24,
       ),
       title: title,
-      content: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: responsiveDialogMaxWidth(context),
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              content,
-              if (actions != null) ...[
-                const SizedBox(height: 20),
-                actions!,
+      content: SizedBox(
+        width: dialogWidth,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: maxBodyHeight.clamp(280, 720),
+          ),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(bottom: viewInsets.bottom > 0 ? 8 : 0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                content,
+                if (actionWidgets != null) ...[
+                  const SizedBox(height: 16),
+                  AuthDialogActions(actions: actionWidgets),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

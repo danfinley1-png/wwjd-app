@@ -1,9 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:uuid/uuid.dart';
 
 import '../../models/shared_reflection.dart';
-import '../config.dart';
+import '../app_links.dart';
+import '../content_guidance/content_guidance_models.dart';
+import '../content_guidance/shared_content_gate.dart';
+import '../gift_share_payload.dart';
 
 class ShareService {
   ShareService({FirebaseFirestore? firestore})
@@ -20,18 +22,62 @@ class ShareService {
     required String response,
     String? title,
     String? createdByUid,
+    Map<String, dynamic>? extraFields,
   }) async {
+    final personalNote = extraFields?['personalNote']?.toString();
+
+    final prepared = sharedContentGate.processSilently(
+      SharedContentInput(
+        question: question,
+        response: response,
+        title: title,
+        personalNote: personalNote,
+      ),
+      channel: SharedContentChannel.shareLink,
+    );
+    final sanitized = prepared.input;
+
     final id = _generateShareId();
-    await _shares.doc(id).set({
-      'question': question.trim(),
-      'response': response.trim(),
-      'title': (title?.trim().isNotEmpty == true)
-          ? title!.trim()
+    final data = <String, dynamic>{
+      'question': (sanitized.question ?? question).trim(),
+      'response': (sanitized.response ?? response).trim(),
+      'title': ((sanitized.title ?? title)?.trim().isNotEmpty == true)
+          ? (sanitized.title ?? title)!.trim()
           : 'Shared Reflection',
       'createdByUid': createdByUid,
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    };
+    if (extraFields != null) {
+      extraFields.remove('createdAt');
+      final revisedNote = sanitized.personalNote ?? personalNote;
+      final merged = Map<String, dynamic>.from(extraFields);
+      if (revisedNote != null) {
+        merged['personalNote'] = revisedNote.trim().isEmpty ? null : revisedNote.trim();
+      }
+      if (prepared.requiresAnonymousSharing) {
+        merged['shareAnonymously'] = true;
+        merged['sharedByDisplayName'] = null;
+        merged['favoriteSaint'] = null;
+      }
+      data.addAll(merged);
+    }
+    await _shares.doc(id).set(data);
     return id;
+  }
+
+  /// Creates a branded gift / Kingdom Challenge share link.
+  Future<String> createGiftShare({
+    required GiftSharePayload payload,
+    String? createdByUid,
+  }) async {
+    final doc = payload.toShareDocument(createdByUid: createdByUid);
+    return createShare(
+      question: doc['question'] as String,
+      response: doc['response'] as String,
+      title: doc['title'] as String,
+      createdByUid: createdByUid,
+      extraFields: doc,
+    );
   }
 
   Future<SharedReflection?> getShare(String id) async {
@@ -52,15 +98,7 @@ class ShareService {
     return '$base/s/$shareId';
   }
 
-  String _shareBaseOrigin() {
-    if (AppConfig.webBaseUrl != null && AppConfig.webBaseUrl!.isNotEmpty) {
-      return AppConfig.webBaseUrl!.replaceAll(RegExp(r'/+$'), '');
-    }
-    if (kIsWeb) {
-      return Uri.base.origin;
-    }
-    return 'https://wwjd.app';
-  }
+  String _shareBaseOrigin() => AppLinks.baseOrigin();
 
   String _generateShareId() {
     return const Uuid().v4().replaceAll('-', '').substring(0, 12);

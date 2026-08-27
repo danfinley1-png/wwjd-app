@@ -1,4 +1,24 @@
 {
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ]
+    }
+  ],
   "hosting": {
     "public": "build/web",
     "ignore": [
@@ -8,9 +28,72 @@
     ],
     "rewrites": [
       {
+        "source": "/api/chat",
+        "function": "chatCompletions"
+      },
+      {
+        "source": "/api/profile-photo",
+        "function": "uploadProfilePhoto"
+      },
+      {
+        "source": "/api/nearby-parishes",
+        "function": "nearbyParishes"
+      },
+      {
+        "source": "/api/org-logo",
+        "function": "uploadOrgLogo"
+      },
+      {
+        "source": "/ensurePlatformAdmin",
+        "function": "ensurePlatformAdmin"
+      },
+      {
+        "source": "/provisionInstitutionalUsers",
+        "function": "provisionInstitutionalUsers"
+      },
+      {
+        "source": "/api/provisionInstitutionalUsers",
+        "function": "provisionInstitutionalUsers"
+      },
+      {
+        "source": "/api/ensurePlatformAdmin",
+        "function": "ensurePlatformAdmin"
+      },
+      {
+        "source": "/api/getUsageReport",
+        "function": "getUsageReport"
+      },
+      {
+        "source": "/getUsageReport",
+        "function": "getUsageReport"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
     ]
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "wwjd-di-e36ce",
+          "appId": "1:28066521495:android:2897b9f668922af97b64d2",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "wwjd-di-e36ce",
+          "configurations": {
+            "android": "1:28066521495:android:2897b9f668922af97b64d2",
+            "ios": "1:28066521495:ios:9cfb6eb513c0fd1b7b64d2",
+            "macos": "1:28066521495:ios:9cfb6eb513c0fd1b7b64d2",
+            "web": "1:28066521495:web:36a56d7984239c167b64d2",
+            "windows": "1:28066521495:web:36a56d7984239c167b64d2"
+          }
+        }
+      }
+    }
   }
 }

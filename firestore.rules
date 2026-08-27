@@ -1,16 +1,1028 @@
 rules_version = '2';
+
+// Assumed Data Model (school / organization calendar)
+// Collection: organizations/{orgId}/invites/{inviteId}
+//   email, status pending|accepted|revoked, role, groupIds, invitedByUid
+//   Invitee (matching email) may set status to accepted|revoked and acceptedAt/acceptedByUid
+// Collection: emailInvites/{emailKey}/items/{inviteId} — same payload, invitee inbox
+// Collection: pendingOrgJoinsByEmail/{emailKey}/orgs/{orgId} — delivery marker; invitee may delete
+// Collection: organizations/{orgId}/calendarSchedules/default
+//   - organizationId: string (required, immutable, must equal orgId)
+//   - visibility: organization|groups
+//   - groupIds: list <= 30 (empty iff visibility == organization)
+//   - rows: list <= 80 of maps:
+//       id, title (1-200), whenText (1-200, freeform When),
+//       location (<=200), notes (<=2000), sortOrder
+//       optional startAt/endAt timestamps and allDay from earlier dated events
+//   - createdByUid: string (required, immutable)
+//   - createdAt: timestamp (immutable)
+//   - updatedByUid: string (must equal auth uid)
+//   - updatedAt: timestamp
+// Collection: organizations/{orgId}/calendarEvents/{eventId} (legacy dated events)
+// Collection: organizations/{orgId}
+//   - logoUrl: string optional <= 2000 — single org brand; groups inherit it
+// Collection: organizations/{orgId}/groups/{groupId}/gifts/{giftId}
+//   Canonical group-owned My Gifts definition (not private spiritual content)
+//   - organizationId: string (required, immutable, must equal orgId)
+//   - groupId: string (required, immutable, must equal groupId)
+//   - groupName, organizationName: string optional
+//   - title: string 1-200
+//   - description: string 1-4000
+//   - linkedPrayerId: string optional <= 80
+//   - frequency: Daily|Weekly|Monthly|One-time
+//   - specificTime: string optional <= 16 (HH:mm)
+//   - daysOfWeek: list optional
+//   - active: bool
+//   - logoUrl: string optional <= 2000
+//   - sharedFromGiftId, sharedFromGroupId: optional <= 128 when copied to another group
+//   - createdByUid: string (required, immutable)
+//   - createdAt, updatedAt: timestamp
+// Member copies: users/{uid}/gifts/{giftId} with source == 'groupGift'
+//   Org admins and group leaders (for groups they lead) may create/update those
+//   copies only for members of that group. They cannot read other users'
+//   personal gifts, chat, reflections, or history.
+// Personal spiritual collections (chat, reflections, history, personal gifts)
+// remain inaccessible to organization administrators.
+
 service cloud.firestore {
+
   match /databases/{database}/documents {
-    // Public read for share deep links; authenticated users can create shares.
-    match /shares/{shareId} {
-      allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null
-        && request.auth.uid == resource.data.createdByUid;
+
+    function isSignedIn() {
+
+      return request.auth != null;
+
     }
 
-    match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+
+    function normalizedAuthEmail() {
+
+      return request.auth.token.email.lower();
+
     }
+
+    function inviteEmailMatchesAuth() {
+      return isSignedIn()
+        && request.auth.token.email != null
+        && resource.data.keys().hasAny(['email'])
+        && resource.data.email is string
+        && resource.data.email.lower() == normalizedAuthEmail();
+    }
+
+    /// Invitee may only mark their own pending org invite accepted or declined.
+    function isValidOrgInviteeResponse() {
+      return inviteEmailMatchesAuth()
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['accepted', 'revoked']
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'acceptedAt', 'acceptedByUid']);
+    }
+
+
+
+    function isFoundationAdmin() {
+      return isSignedIn()
+        && request.auth.token.email != null
+        && normalizedAuthEmail() == 'dan.finley@verizon.net';
+    }
+
+    function isSuperAdmin() {
+      return isFoundationAdmin()
+        || (isSignedIn()
+          && exists(/databases/$(database)/documents/platformAdmins/$(request.auth.uid)));
+    }
+
+
+
+    function isOrganizationCreator(orgId) {
+
+      return isSignedIn()
+
+        && exists(/databases/$(database)/documents/organizations/$(orgId))
+
+        && get(/databases/$(database)/documents/organizations/$(orgId)).data.createdByUid == request.auth.uid;
+
+    }
+
+
+
+    function isOrgMember(orgId) {
+
+      return isSignedIn()
+
+        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+
+    }
+
+
+
+    function orgMemberRole(orgId) {
+
+      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role;
+
+    }
+
+
+
+    function isOrgAdmin(orgId) {
+
+      return isSuperAdmin()
+
+        || isOrganizationCreator(orgId)
+
+        || (isOrgMember(orgId) && orgMemberRole(orgId) == 'orgAdmin');
+
+    }
+
+
+
+    function canManageGroups(orgId) {
+
+      return isSuperAdmin()
+
+        || isOrganizationCreator(orgId)
+
+        || (isOrgMember(orgId)
+
+          && orgMemberRole(orgId) in ['orgAdmin', 'groupLeader']);
+
+    }
+
+
+
+    function canInviteToGroup(orgId) {
+
+      return canManageGroups(orgId);
+
+    }
+
+
+
+    function isValidGroupGiftDef(orgId, groupId) {
+
+      let d = request.resource.data;
+
+      return d.organizationId == orgId
+
+        && d.groupId == groupId
+
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
+
+        && d.description is string && d.description.size() > 0 && d.description.size() <= 4000
+
+        && d.frequency in ['Daily', 'Weekly', 'Monthly', 'One-time']
+
+        && d.active is bool
+
+        && d.createdByUid is string && d.createdByUid.size() > 0 && d.createdByUid.size() <= 128
+
+        && d.createdAt is timestamp
+
+        && (!('linkedPrayerId' in d) || (d.linkedPrayerId is string && d.linkedPrayerId.size() <= 128))
+
+        && (!('specificTime' in d) || (d.specificTime is string && d.specificTime.size() <= 16))
+
+        && (!('logoUrl' in d) || (d.logoUrl is string && d.logoUrl.size() <= 2000))
+
+        && (!('groupName' in d) || (d.groupName is string && d.groupName.size() <= 200))
+
+        && (!('organizationName' in d) || (d.organizationName is string && d.organizationName.size() <= 300))
+
+        && (!('daysOfWeek' in d) || d.daysOfWeek is list)
+
+        && (!('sharedFromGiftId' in d) || (d.sharedFromGiftId is string && d.sharedFromGiftId.size() <= 128))
+
+        && (!('sharedFromGroupId' in d) || (d.sharedFromGroupId is string && d.sharedFromGroupId.size() <= 128))
+
+        && (!('updatedAt' in d) || d.updatedAt is timestamp);
+
+    }
+
+
+
+    function isValidGroupGiftCopy() {
+
+      let d = request.resource.data;
+
+      return d.source == 'groupGift'
+
+        && d.organizationId is string && d.organizationId.size() > 0 && d.organizationId.size() <= 128
+
+        && d.groupId is string && d.groupId.size() > 0 && d.groupId.size() <= 128
+
+        && d.userId is string && d.userId.size() > 0 && d.userId.size() <= 128
+
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200;
+
+    }
+
+
+
+    /// Platform or org leaders viewing institutional management data.
+    function canViewOrgManagement(orgId) {
+
+      return isSuperAdmin() || isOrgAdmin(orgId) || canManageGroups(orgId);
+
+    }
+
+
+
+    function canDeliverOrgInvite(orgId) {
+
+      return isOrgAdmin(orgId)
+
+        || (canManageGroups(orgId)
+
+          && request.resource.data.role in ['member', 'groupLeader']);
+
+    }
+
+
+
+    function canViewOrgInsights(orgId) {
+
+      return isSuperAdmin()
+
+        || (isOrgMember(orgId)
+
+          && orgMemberRole(orgId) in ['orgAdmin', 'groupLeader']);
+
+    }
+
+    function memberGroupIds(orgId) {
+      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.get('groupIds', []);
+    }
+
+    function canReadCalendarEvent(orgId) {
+      return isOrgAdmin(orgId)
+        || (
+          isOrgMember(orgId)
+          && resource.data.visibility == 'organization'
+        )
+        || (
+          isOrgMember(orgId)
+          && resource.data.visibility == 'groups'
+          && resource.data.groupIds is list
+          && resource.data.groupIds.hasAny(memberGroupIds(orgId))
+        );
+    }
+
+    function isValidCalendarEvent(orgId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'organizationId', 'title', 'description', 'location', 'category',
+          'allDay', 'startAt', 'endAt', 'visibility', 'groupIds',
+          'createdByUid', 'createdAt', 'updatedAt'
+        ])
+        && d.keys().hasAll([
+          'organizationId', 'title', 'description', 'location', 'category',
+          'allDay', 'startAt', 'endAt', 'visibility', 'groupIds',
+          'createdByUid', 'createdAt', 'updatedAt'
+        ])
+        && d.organizationId is string
+        && d.organizationId == orgId
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
+        && d.description is string && d.description.size() <= 4000
+        && d.location is string && d.location.size() <= 300
+        && d.category in ['liturgy', 'academics', 'athletics', 'ministry', 'other']
+        && d.allDay is bool
+        && d.startAt is timestamp
+        && d.endAt is timestamp
+        && d.endAt > d.startAt
+        && d.visibility in ['organization', 'groups']
+        && d.groupIds is list
+        && d.groupIds.size() <= 30
+        && d.createdByUid is string
+        && d.createdAt is timestamp
+        && (
+          d.visibility == 'organization'
+            ? d.groupIds.size() == 0
+            : d.groupIds.size() > 0
+        );
+    }
+
+    function calendarEventIdentityUnchanged() {
+      return request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    function isValidCalendarSchedule(orgId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'organizationId', 'visibility', 'groupIds', 'rows',
+          'createdByUid', 'createdAt', 'updatedByUid', 'updatedAt'
+        ])
+        && d.keys().hasAll([
+          'organizationId', 'visibility', 'groupIds', 'rows',
+          'createdByUid', 'createdAt', 'updatedByUid', 'updatedAt'
+        ])
+        && d.organizationId is string
+        && d.organizationId == orgId
+        && d.visibility in ['organization', 'groups']
+        && d.groupIds is list
+        && d.groupIds.size() <= 30
+        && d.rows is list
+        && d.rows.size() <= 80
+        && d.createdByUid is string
+        && d.createdAt is timestamp
+        && d.updatedByUid is string
+        && d.updatedByUid == request.auth.uid
+        && (
+          d.visibility == 'organization'
+            ? d.groupIds.size() == 0
+            : d.groupIds.size() > 0
+        );
+    }
+
+    function hasPendingOrgInvite(orgId) {
+
+      return isSignedIn()
+
+        && request.auth.token.email != null
+
+        && exists(/databases/$(database)/documents/pendingOrgJoinsByEmail/$(normalizedAuthEmail())/orgs/$(orgId));
+
+    }
+
+
+
+    function isBootstrapOrgAdmin(orgId, memberId) {
+
+      return isSignedIn()
+
+        && request.auth.uid == memberId
+
+        && request.resource.data.role == 'orgAdmin'
+
+        && get(/databases/$(database)/documents/organizations/$(orgId)).data.createdByUid == request.auth.uid;
+
+    }
+
+
+
+    function memberSelfGroupIdsUpdate(orgId, memberId) {
+
+      return isSignedIn()
+
+        && request.auth.uid == memberId
+
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['groupIds']);
+
+    }
+
+
+
+    function isGroupMember(orgId, groupId) {
+
+      return isSignedIn()
+
+        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid))
+
+        && get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.keys().hasAny(['groupIds'])
+
+        && groupId in get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.groupIds;
+
+    }
+
+
+
+    /// Org admin: all groups. Group leader: only groups listed on their membership.
+    function canManageGroupGifts(orgId, groupId) {
+
+      return isOrgAdmin(orgId)
+
+        || (
+
+          isOrgMember(orgId)
+
+          && orgMemberRole(orgId) == 'groupLeader'
+
+          && isGroupMember(orgId, groupId)
+
+        );
+
+    }
+
+
+
+    function canDeliverGroupGiftCopy(userId) {
+
+      let d = request.resource.data;
+
+      return isValidGroupGiftCopy()
+
+        && d.userId == userId
+
+        && canManageGroupGifts(d.organizationId, d.groupId)
+
+        && exists(/databases/$(database)/documents/organizations/$(d.organizationId)/members/$(userId))
+
+        && get(/databases/$(database)/documents/organizations/$(d.organizationId)/members/$(userId)).data.keys().hasAny(['groupIds'])
+
+        && d.groupId in get(/databases/$(database)/documents/organizations/$(d.organizationId)/members/$(userId)).data.groupIds;
+
+    }
+
+
+
+    function canShareToGroup(orgId, groupId) {
+
+      return isSuperAdmin() || isGroupMember(orgId, groupId);
+
+    }
+
+
+
+    // App configuration readable by all clients (TTS voice hints, etc.).
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+
+
+    match /shares/{shareId} {
+
+      allow read: if true;
+
+      allow create: if isSignedIn();
+
+      allow update, delete: if isSignedIn()
+
+        && request.auth.uid == resource.data.createdByUid;
+
+    }
+
+
+
+    // Personal spiritual data — owner only. Admins never receive cross-user access.
+
+    match /users/{userId} {
+
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+
+
+
+      match /orgMemberships/{orgId} {
+
+        allow read: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() && request.auth.uid == userId && (
+
+          request.resource.data.role == 'member'
+
+          || hasPendingOrgInvite(orgId)
+
+          || isBootstrapOrgAdmin(orgId, userId)
+
+        );
+
+        allow update: if isSignedIn() && (
+
+          isOrgAdmin(orgId)
+
+          || (
+
+            request.auth.uid == userId
+
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
+
+          )
+
+        );
+
+        allow delete: if isSignedIn() && (
+
+          request.auth.uid == userId
+
+          || isOrgAdmin(orgId)
+
+        );
+
+      }
+
+
+
+      match /pendingGroupInvites/{inviteId} {
+
+        allow read: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() && (
+          canInviteToGroup(request.resource.data.organizationId)
+          || (
+            request.auth.uid == userId
+            && request.resource.data.status == 'pending'
+            && exists(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)/groupInvites/$(inviteId))
+            && (
+              get(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)/groupInvites/$(inviteId)).data.inviteeUid == request.auth.uid
+              || (
+                request.auth.token.email != null
+                && get(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)/groupInvites/$(inviteId)).data.inviteeEmail == normalizedAuthEmail()
+              )
+            )
+            && get(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)/groupInvites/$(inviteId)).data.status == 'pending'
+          )
+        );
+
+        allow update: if isSignedIn() && request.auth.uid == userId;
+
+        allow delete: if isSignedIn() && (
+
+          request.auth.uid == userId
+
+          || canManageGroups(resource.data.organizationId)
+
+        );
+
+      }
+
+
+
+      match /groupMemberships/{groupId} {
+
+        allow read: if isSignedIn() && request.auth.uid == userId;
+
+        allow create, update: if isSignedIn() && request.auth.uid == userId;
+
+        allow delete: if isSignedIn() && (
+
+          request.auth.uid == userId
+
+          || canManageGroups(resource.data.organizationId)
+
+        );
+
+      }
+
+
+
+      match /groupPractices/{practiceId} {
+
+        allow read: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() && (
+
+          request.auth.uid == userId
+
+          || isOrgAdmin(request.resource.data.organizationId)
+
+        );
+
+        allow update: if isSignedIn() && request.auth.uid == userId;
+
+        allow delete: if isSignedIn() && (
+
+          request.auth.uid == userId
+
+          || isOrgAdmin(resource.data.organizationId)
+
+        );
+
+      }
+
+
+
+      match /gifts/{giftId} {
+
+        allow read: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() && (
+
+          request.auth.uid == userId
+
+          || canDeliverGroupGiftCopy(userId)
+
+        );
+
+        allow update: if isSignedIn() && (
+
+          request.auth.uid == userId
+
+          || (
+
+            resource.data.source == 'groupGift'
+
+            && canManageGroupGifts(resource.data.organizationId, resource.data.groupId)
+
+          )
+
+          || canDeliverGroupGiftCopy(userId)
+
+        );
+
+        allow delete: if isSignedIn() && (
+
+          request.auth.uid == userId
+
+          || (
+
+            resource.data.source == 'groupGift'
+
+            && canManageGroupGifts(resource.data.organizationId, resource.data.groupId)
+
+          )
+
+        );
+
+      }
+
+
+
+      match /{document=**} {
+
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+
+      }
+
+    }
+
+
+
+    match /platformAdmins/{adminId} {
+
+      allow read: if isSignedIn() && request.auth.uid == adminId;
+
+      allow create: if isSignedIn()
+
+        && request.auth.uid == adminId
+
+        && (isFoundationAdmin() || request.resource.data.role == 'superAdmin');
+
+      allow update, delete: if false;
+
+    }
+
+
+
+    match /walkTogether/{journeyId} {
+
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+
+        && request.resource.data.createdByUid == request.auth.uid;
+
+      allow update: if isSignedIn();
+
+      allow delete: if isSignedIn()
+
+        && request.auth.uid == resource.data.createdByUid;
+
+    }
+
+
+
+    match /organizations/{orgId} {
+
+      allow read: if isOrgMember(orgId) || isOrganizationCreator(orgId) || isSuperAdmin();
+
+      allow create: if isSignedIn()
+
+        && request.resource.data.createdByUid == request.auth.uid;
+
+      allow update: if isOrgAdmin(orgId);
+
+      allow delete: if isOrgAdmin(orgId);
+
+
+
+      match /groups/{groupId} {
+
+        allow read: if isOrgMember(orgId) || isOrganizationCreator(orgId) || isSuperAdmin();
+
+        allow create, update, delete: if canManageGroups(orgId);
+
+
+
+        match /shares/{shareId} {
+
+          allow read: if isSuperAdmin()
+
+            || isGroupMember(orgId, groupId)
+
+            || canManageGroups(orgId);
+
+          allow create: if isSignedIn()
+
+            && request.resource.data.createdByUid == request.auth.uid
+
+            && request.resource.data.groupId == groupId
+
+            && request.resource.data.organizationId == orgId
+
+            && canShareToGroup(orgId, groupId);
+
+          allow update: if false;
+
+          allow delete: if isSignedIn() && (
+
+            resource.data.createdByUid == request.auth.uid
+
+            || canManageGroups(orgId)
+
+          );
+
+        }
+
+
+
+        match /schedules/{scheduleId} {
+
+          allow read: if isSuperAdmin()
+
+            || isGroupMember(orgId, groupId)
+
+            || canManageGroups(orgId);
+
+          allow create: if isOrgAdmin(orgId)
+
+            && request.resource.data.organizationId == orgId
+
+            && request.resource.data.groupId == groupId
+
+            && request.resource.data.createdByUid == request.auth.uid;
+
+          allow update: if isOrgAdmin(orgId);
+
+          allow delete: if isOrgAdmin(orgId);
+
+        }
+
+
+
+        match /gifts/{giftId} {
+
+          allow read: if isSuperAdmin()
+
+            || isGroupMember(orgId, groupId)
+
+            || canManageGroups(orgId);
+
+          allow create: if canManageGroupGifts(orgId, groupId)
+
+            && isValidGroupGiftDef(orgId, groupId)
+
+            && request.resource.data.createdByUid == request.auth.uid
+
+            && request.resource.data.organizationId == orgId
+
+            && request.resource.data.groupId == groupId;
+
+          allow update: if canManageGroupGifts(orgId, groupId)
+
+            && isValidGroupGiftDef(orgId, groupId)
+
+            && request.resource.data.createdByUid == resource.data.createdByUid
+
+            && request.resource.data.organizationId == resource.data.organizationId
+
+            && request.resource.data.groupId == resource.data.groupId;
+
+          allow delete: if isOrgAdmin(orgId);
+
+        }
+
+      }
+
+
+
+      match /members/{memberId} {
+
+        allow read: if isOrgMember(orgId)
+
+          || isOrganizationCreator(orgId)
+
+          || isSuperAdmin()
+
+          || (isSignedIn() && request.auth.uid == memberId);
+
+        allow create: if isSignedIn() && (
+
+          isOrgAdmin(orgId)
+
+          || isBootstrapOrgAdmin(orgId, memberId)
+
+          || (request.auth.uid == memberId && hasPendingOrgInvite(orgId))
+
+        );
+
+        allow update: if isOrgAdmin(orgId) || memberSelfGroupIdsUpdate(orgId, memberId);
+
+        allow delete: if isOrgAdmin(orgId);
+
+      }
+
+
+
+      match /invites/{inviteId} {
+
+        allow read: if canViewOrgManagement(orgId);
+
+        allow create: if canDeliverOrgInvite(orgId);
+
+        allow update: if canDeliverOrgInvite(orgId)
+          || isValidOrgInviteeResponse();
+
+        allow delete: if isOrgAdmin(orgId);
+
+      }
+
+
+
+      match /emailDeliveryLogs/{logId} {
+
+        allow read: if canViewOrgManagement(orgId);
+
+        allow write: if false;
+
+      }
+
+
+
+      match /groupInvites/{inviteId} {
+
+        allow read: if isSuperAdmin()
+          || canInviteToGroup(orgId)
+          || (isSignedIn() && resource.data.inviteeUid == request.auth.uid)
+          || (isSignedIn()
+            && request.auth.token.email != null
+            && resource.data.inviteeEmail == normalizedAuthEmail());
+
+        allow create: if canInviteToGroup(orgId)
+
+          && request.resource.data.status == 'pending'
+
+          && request.resource.data.invitedByUid == request.auth.uid
+
+          && request.resource.data.organizationId == orgId;
+
+        allow update: if (
+          isSignedIn()
+          && resource.data.status == 'pending'
+          && request.resource.data.status in ['accepted', 'rejected']
+          && (
+            resource.data.inviteeUid == request.auth.uid
+            || (
+              request.auth.token.email != null
+              && resource.data.inviteeEmail == normalizedAuthEmail()
+            )
+          )
+        ) || (
+
+          canManageGroups(orgId)
+
+          && request.resource.data.status == 'rejected'
+
+        );
+
+        allow delete: if canManageGroups(orgId);
+
+      }
+
+      match /calendarEvents/{eventId} {
+        allow read: if canReadCalendarEvent(orgId);
+
+        allow create: if isOrgAdmin(orgId)
+          && isValidCalendarEvent(orgId)
+          && request.resource.data.createdByUid == request.auth.uid;
+
+        allow update: if isOrgAdmin(orgId)
+          && isValidCalendarEvent(orgId)
+          && calendarEventIdentityUnchanged();
+
+        allow delete: if isOrgAdmin(orgId);
+      }
+
+      match /calendarSchedules/{scheduleId} {
+        allow read: if canReadCalendarEvent(orgId);
+
+        allow create: if isOrgAdmin(orgId)
+          && scheduleId == 'default'
+          && isValidCalendarSchedule(orgId)
+          && request.resource.data.createdByUid == request.auth.uid;
+
+        allow update: if isOrgAdmin(orgId)
+          && scheduleId == 'default'
+          && isValidCalendarSchedule(orgId)
+          && calendarEventIdentityUnchanged();
+
+        allow delete: if isOrgAdmin(orgId) && scheduleId == 'default';
+      }
+
+    }
+
+
+
+    match /emailInvites/{emailKey}/items/{inviteId} {
+
+      allow read: if isSignedIn() && normalizedAuthEmail() == emailKey;
+
+      allow create: if isSignedIn()
+
+        && canDeliverOrgInvite(request.resource.data.organizationId);
+
+      allow update: if isSignedIn() && (
+        isValidOrgInviteeResponse()
+        || canDeliverOrgInvite(resource.data.organizationId)
+      );
+
+      allow delete: if isSignedIn() && (
+        isOrgAdmin(resource.data.organizationId)
+        || canManageGroups(resource.data.organizationId)
+      );
+
+    }
+
+
+
+    match /pendingOrgJoinsByEmail/{emailKey}/orgs/{orgId} {
+
+      allow read: if isSignedIn() && normalizedAuthEmail() == emailKey;
+
+      allow create: if isSignedIn() && canDeliverOrgInvite(orgId);
+
+      allow update: if isSignedIn() && canDeliverOrgInvite(orgId);
+
+      allow delete: if isSignedIn() && (
+
+        normalizedAuthEmail() == emailKey || isOrgAdmin(orgId)
+
+      );
+
+    }
+
+
+
+    match /platformEmailLogs/{logId} {
+
+      allow read: if isSuperAdmin();
+
+      allow write: if false;
+
+    }
+
+
+
+    match /insightsRecords/{recordId} {
+
+      allow read: if isSignedIn()
+
+        && (isSuperAdmin() || canViewOrgInsights(resource.data.organizationId));
+
+      allow write: if false;
+
+    }
+
+
+
+    match /{path=**}/groupInvites/{inviteId} {
+
+      allow read: if isSignedIn() && (
+        isSuperAdmin()
+        || resource.data.inviteeUid == request.auth.uid
+        || (
+          request.auth.token.email != null
+          && resource.data.inviteeEmail == normalizedAuthEmail()
+        )
+        || canInviteToGroup(resource.data.organizationId)
+      );
+
+    }
+
+
+
+    match /{path=**}/invites/{inviteId} {
+
+      allow read: if isSignedIn() && (
+        isSuperAdmin()
+        || canViewOrgManagement(resource.data.organizationId)
+        || (
+          request.auth.token.email != null
+          && resource.data.email is string
+          && resource.data.email.lower() == normalizedAuthEmail()
+        )
+      );
+
+    }
+
+
+
+    // Aggregate platform usage — counters only, no spiritual content.
+    // Writers: any signed-in user (including guests). Readers: Super Admin only.
+    match /platformUsage/daily/days/{dayId} {
+      allow read: if isSuperAdmin();
+      allow create, update: if isSignedIn();
+    }
+
+    match /platformUsage/meta/docs/{docId} {
+      allow read: if isSuperAdmin();
+      allow create, update: if isSignedIn() && docId == 'tracking';
+    }
+
   }
+
 }
+
+

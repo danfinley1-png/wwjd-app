@@ -62,12 +62,13 @@ class HistoryRepository {
       final data = snap.data();
       final list = data?['sessionHistory'] as List<dynamic>? ?? [];
       return list
-          .map((e) => ChatMessage.fromMap(Map<String, dynamic>.from(e as Map)))
+          .whereType<Map>()
+          .map((e) => ChatMessage.fromMap(Map<String, dynamic>.from(e)))
           .where((m) => m.isPersistable)
           .toList();
     } catch (e) {
       print('HistoryRepository.loadHistoryForUid error: $e');
-      return [];
+      rethrow;
     }
   }
 
@@ -209,8 +210,18 @@ class HistoryRepository {
     var guestMessages = mergeHistories(inMemoryHistory, localMessages);
 
     if (anonymousUid != null && anonymousUid != user.uid) {
-      final anonFirestore = await loadHistoryForUid(anonymousUid);
-      guestMessages = mergeHistories(guestMessages, anonFirestore);
+      try {
+        final anonFirestore = await loadHistoryForUid(anonymousUid);
+        guestMessages = mergeHistories(guestMessages, anonFirestore);
+      } catch (e) {
+        // After email/Google sign-in the Auth token is the new uid, so
+        // users/{anonymousUid} is no longer readable. Guest Firestore history
+        // must be captured before the identity switch; never fail sign-in.
+        print(
+          'HistoryRepository: skipped guest Firestore history for '
+          '$anonymousUid after account switch: $e',
+        );
+      }
     }
 
     if (guestMessages.isEmpty) {

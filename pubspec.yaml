@@ -21,11 +21,16 @@ dependencies:
   uuid: ^4.5.1
   flutter_riverpod: ^2.6.1
   shared_preferences: ^2.5.3
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.10.0
+  flutter_timezone: ^4.1.0
   
   # Firebase (updated versions)
   firebase_core: ^4.12.1
   firebase_auth: ^6.5.6
   cloud_firestore: ^6.7.1
+  firebase_storage: ^13.4.5
+  image_picker: ^1.1.2
   
   # Speech & TTS (keep)
   speech_to_text: ^7.4.0
@@ -33,6 +38,8 @@ dependencies:
   
   # Google Sign-In (keep)
   google_sign_in: ^7.2.0
+  file_picker: ^3.0.4
+  geolocator: ^13.0.4
 
 dev_dependencies:
   flutter_lints: ^6.0.0

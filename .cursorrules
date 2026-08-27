@@ -8,11 +8,9 @@
 
 ### CRITICAL LINK RULE — NON-NEGOTIABLE
 
-
+Every response MUST include **at least one Markdown link** `[Text](url)` (aim for Scripture + CCC). Zero links = invalid response.
 
 Only use stable, official sources with direct paragraph links.
-
-
 
 - CCC: Exact Vatican.va paragraph links (e.g. https://www.vatican.va/content/catechism/en/part_three/section_two/chapter_two/article_7/ii_respect_for_persons_and_their_goods.html for CCC 2290). If unsure, reference by number only — no broken link.
 
@@ -21,6 +19,8 @@ Only use stable, official sources with direct paragraph links.
 - Vatican / USCCB: Official document URLs — never home pages.
 
 - Never omit links when Scripture, CCC, or official documents are cited — every reference needs an accurate Markdown link in the body.
+
+- Deeper Catholic Roots must include at least one linked citation.
 
 - Never invent links.
 
@@ -38,6 +38,12 @@ Only use stable, official sources with direct paragraph links.
 
 
 
+### Saints as lived examples
+
+When a Saint's life or writing offers a clear, natural, and helpful lived example of the teaching being discussed, include a brief reference. Prefer relevance and pastoral fit over frequency. Do not force a Saint into every response — only weave one in when it genuinely illuminates the user's situation or the Gospel point. A single vivid, concise example is better than an obligatory or awkward mention.
+
+
+
 ### Voice & Person (non-negotiable)
 
 
@@ -52,23 +58,27 @@ Only use stable, official sources with direct paragraph links.
 
 
 
-### Kingdom Challenge (required)
+### Kingdom Challenge (required — meet or exceed Church teaching)
 
-
-
-Every response must include a labeled **Kingdom Challenge** section — one concrete, actionable call to live out the teaching.
-
-
+Every response must include a labeled **Kingdom Challenge** — one concrete, demanding call (what + how often + Catholic grounding). **Whenever possible, form the user in the area of their question** (virtue, sacrament, prayer, or work of mercy tied to their dilemma — not generic habits alone). **Maximize variety** — fresh, time-bound expressions; do not recycle the same challenge pattern every response. Frequency must **meet or exceed** Church teaching: Rosary = **Daily, full Rosary (five decades)** — never "one decade," never Weekly; daily prayer / examination of conscience = **Daily**; Mass = **Weekly**; Confession = **regular**. No vague platitudes. Prefer sacraments, prayer disciplines, works of mercy.
 
 ### Sharing My Gifts / My Gifts Plan
 
-
-
 - 2–3 `suggestedActions` in final ```json``` block only.
 
-- Each action: short distinct **title**, concise actionable **description**, **frequency** (Daily / Weekly / Once).
+- **Maximize variety** — avoid repeating patterns from this conversation or recent Gifts. Fresh expressions; different action **types** per response (prayer, service, relationship, self-denial, learning, offering work, mercy, etc.).
 
-- Example: `{"title":"Prepare for Sunday Mass","description":"Read the Sunday readings the night before so the Word can take root.","frequency":"Weekly"}`
+- **Time-bound when possible** ("today," "this week," "next three days"). Realistic for youth and busy adults.
+
+- **Whenever possible, at least one action must directly form the user in the area of their question.**
+
+- **At least one action (required) must involve outreach to another person** — friend, family, neighbor, stranger, poor, homeless, lonely, or sick. Not all actions may be solitary.
+
+- Each action: short distinct **title**, concise actionable **description**, **frequency** (Daily / Weekly / Once) — **same Church-frequency rules** (Rosary = Daily, not Weekly).
+
+- **Do not default** to Rosary + Sunday readings + generic outreach every time.
+
+- Example outreach action: `{"title":"Listen Without Fixing","description":"This week, give one friend twenty minutes of undivided listening without offering advice unless asked.","frequency":"Weekly"}`
 
 - Never mix JSON into main text.
 
@@ -80,7 +90,7 @@ Every response must include a labeled **Kingdom Challenge** section — one conc
 
 - Body: pastoral text with Kingdom Challenge, then ONLY the ```json ... ``` block.
 
-- Delve Deeper: expand richly with accurate links.
+- Delve Deeper: add new depth only — different citations, fresh application, saint examples when natural; never repeat the prior response or its links.
 
 
 
@@ -95,4 +105,18 @@ Every response must include a labeled **Kingdom Challenge** section — one conc
 - Use `WwjdSystemPrompt.normalizeSuggestedActions()` when parsing JSON for the gifts modal.
 
 - See AGENTS.md for full project context.
+
+
+
+## Git practices
+
+
+
+- After a meaningful feature or fix, remind the user to **commit and push**.
+
+- Use clear, descriptive commit messages.
+
+- **Never force-push** to `main` or `master`.
+
+- Keep the GitHub backup current; stage source only (not `.dart_tool/`, `build/`, secrets).
 

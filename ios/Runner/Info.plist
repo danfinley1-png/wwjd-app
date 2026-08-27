@@ -2,10 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>WWJD-DI uses your location to find nearby Catholic parishes and worship times.</string>
 	<key>NSMicrophoneUsageDescription</key>
     <string>This app needs microphone access for voice input.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>This app uses speech recognition so you can ask questions by voice.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose a photo for your WWJD-DI profile.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo for your WWJD-DI profile.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

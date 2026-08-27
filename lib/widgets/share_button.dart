@@ -1,114 +1,137 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:share_plus/share_plus.dart';
 
-import '../core/providers/app_providers.dart';
-import '../walk_together_screen.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+
+
+import '../core/app_colors.dart';
+
+import '../core/mobile_touch.dart';
+
+import '../core/share_content.dart';
+
+import 'unified_share_flow.dart';
+
+
 
 class ShareButton extends ConsumerWidget {
+
   final String question;
+
   final String response;
+
   final String? title;
 
+  final String? giftDescription;
+
+  final bool showLabel;
+
+  final String? linkedActivityId;
+
+  final String? linkedPrayerId;
+
+  final bool isGiftActivity;
+
+
+
   const ShareButton({
+
     super.key,
+
     required this.question,
+
     required this.response,
+
     this.title,
+
+    this.giftDescription,
+
+    this.showLabel = false,
+
+    this.linkedActivityId,
+
+    this.linkedPrayerId,
+
+    this.isGiftActivity = false,
+
   });
 
-  void _showShareOptions(BuildContext context, WidgetRef ref) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Share Reflection'),
-        content: const Text(
-          'Share a link to this question and WWJD response. '
-          'Please ensure no personal or confidential information is included.',
-          style: TextStyle(fontSize: 15),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _shareDeepLink(context, ref);
-            },
-            child: const Text('Share Link', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _shareToWalkTogether(context);
-            },
-            child: const Text('Walk Together'),
-          ),
-        ],
-      ),
-    );
+
+
+  void _openShare(BuildContext context) {
+
+    final content = isGiftActivity
+
+        ? ShareContent.gift(
+
+            title: title ?? question.replaceFirst('Activity: ', ''),
+
+            description: giftDescription ?? response,
+
+            linkedActivityId: linkedActivityId,
+
+            linkedPrayerId: linkedPrayerId,
+
+          )
+
+        : ShareContent.reflection(
+
+            question: question,
+
+            response: response,
+
+            title: title,
+
+          );
+
+
+
+    UnifiedShareFlow.show(context, content: content);
+
   }
 
-  Future<void> _shareDeepLink(BuildContext context, WidgetRef ref) async {
-    try {
-      final shareService = ref.read(shareServiceProvider);
-      final auth = ref.read(authServiceProvider);
-      final shareId = await shareService.createShare(
-        question: question,
-        response: response,
-        title: title,
-        createdByUid: auth.currentUser?.uid,
-      );
-      final url = shareService.buildShareUrl(shareId);
-      final preview = question.length > 120
-          ? '${question.substring(0, 117)}...'
-          : question;
 
-      await SharePlus.instance.share(
-        ShareParams(
-          uri: Uri.parse(url),
-          subject: title ?? 'WWJD Shared Reflection',
-          text: 'Someone shared a WWJD reflection with you.\n\n$preview\n\n$url',
-        ),
-      );
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Share link ready')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not share: $e')),
-        );
-      }
-    }
-  }
-
-  void _shareToWalkTogether(BuildContext context) {
-    WalkTogetherScreen.addSharedJourney({
-      'id': DateTime.now().millisecondsSinceEpoch.toString(),
-      'title': title ?? 'Shared Ethical Journey',
-      'question': question,
-      'response': response,
-      'upvotes': 0,
-      'timestamp': DateTime.now(),
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Shared anonymously to Walk Together!')),
-    );
-  }
 
   @override
+
   Widget build(BuildContext context, WidgetRef ref) {
+
+    if (showLabel) {
+
+      return TextButton.icon(
+
+        onPressed: () => _openShare(context),
+
+        icon: const Icon(Icons.share_outlined, size: 20),
+
+        label: const Text('Share'),
+
+        style: TextButton.styleFrom(
+
+          foregroundColor: AppColors.primaryMaroon,
+
+        ).merge(mobileTextButtonStyle(context)),
+
+      );
+
+    }
+
+
+
     return IconButton(
+
       icon: const Icon(Icons.share_outlined, size: 22),
-      tooltip: 'Share reflection',
-      onPressed: () => _showShareOptions(context, ref),
+
+      tooltip: 'Share',
+
+      onPressed: () => _openShare(context),
+
+      style: mobileIconButtonStyle(context),
+
     );
+
   }
+
 }
+
+

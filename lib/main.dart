@@ -7,7 +7,10 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 
 import 'core/config.dart';
 import 'core/app_colors.dart';
+import 'core/gift_reminder_bootstrap.dart';
+import 'core/analytics/usage_analytics_bootstrap.dart';
 import 'core/routing/app_router.dart';
+import 'widgets/account_setup_gate.dart';
 import 'firebase_options.dart';
 import 'package:go_router/go_router.dart';
 
@@ -45,6 +48,11 @@ class WWJDApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
       routerConfig: router,
+      builder: (context, child) => AccountSetupGate(
+        child: UsageAnalyticsBootstrap(
+          child: GiftReminderBootstrap(child: child ?? const SizedBox.shrink()),
+        ),
+      ),
     );
   }
 
@@ -64,6 +72,22 @@ class WWJDApp extends ConsumerWidget {
           fontSize: 28,
           fontWeight: FontWeight.bold,
           color: AppColors.textOnMaroon,
+        ),
+        iconTheme: IconThemeData(color: AppColors.textOnMaroon),
+        actionsIconTheme: IconThemeData(color: AppColors.textOnMaroon),
+      ),
+      tabBarTheme: const TabBarThemeData(
+        labelColor: AppColors.textOnMaroon,
+        unselectedLabelColor: Color(0xB3FFFFFF),
+        indicatorColor: AppColors.textOnMaroon,
+        dividerColor: Color(0x40FFFFFF),
+        labelStyle: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
         ),
       ),
       cardTheme: const CardThemeData(
