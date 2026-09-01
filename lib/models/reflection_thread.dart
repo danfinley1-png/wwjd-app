@@ -36,6 +36,10 @@ class ReflectionThread {
 
     this.linkedSourceTitle,
 
+    this.linkedServiceProjectId,
+
+    this.linkedServiceEntryId,
+
     this.source,
 
   });
@@ -85,6 +89,18 @@ class ReflectionThread {
   /// Display title of the linked gift or journey.
 
   final String? linkedSourceTitle;
+
+
+
+  /// Service Hours project id when [source] is [ReflectionSource.service].
+
+  final String? linkedServiceProjectId;
+
+
+
+  /// Service hour entry id when [source] is [ReflectionSource.service].
+
+  final String? linkedServiceEntryId;
 
 
 
@@ -152,6 +168,10 @@ class ReflectionThread {
 
       linkedSourceTitle: map['linkedSourceTitle']?.toString(),
 
+      linkedServiceProjectId: map['linkedServiceProjectId']?.toString(),
+
+      linkedServiceEntryId: map['linkedServiceEntryId']?.toString(),
+
       source: map['source']?.toString(),
 
     );
@@ -192,6 +212,13 @@ class ReflectionThread {
 
         'linkedSourceTitle': linkedSourceTitle!.trim(),
 
+      if (linkedServiceProjectId != null &&
+          linkedServiceProjectId!.trim().isNotEmpty)
+        'linkedServiceProjectId': linkedServiceProjectId!.trim(),
+
+      if (linkedServiceEntryId != null && linkedServiceEntryId!.trim().isNotEmpty)
+        'linkedServiceEntryId': linkedServiceEntryId!.trim(),
+
       if (source != null && source!.trim().isNotEmpty) 'source': source!.trim(),
 
       'updatedAt': FieldValue.serverTimestamp(),
@@ -226,6 +253,10 @@ class ReflectionThread {
 
     String? linkedSourceTitle,
 
+    String? linkedServiceProjectId,
+
+    String? linkedServiceEntryId,
+
     String? source,
 
   }) {
@@ -255,6 +286,11 @@ class ReflectionThread {
       linkedJourneyId: linkedJourneyId ?? this.linkedJourneyId,
 
       linkedSourceTitle: linkedSourceTitle ?? this.linkedSourceTitle,
+
+      linkedServiceProjectId:
+          linkedServiceProjectId ?? this.linkedServiceProjectId,
+
+      linkedServiceEntryId: linkedServiceEntryId ?? this.linkedServiceEntryId,
 
       source: source ?? this.source,
 

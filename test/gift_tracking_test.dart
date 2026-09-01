@@ -66,6 +66,8 @@ void main() {
       final gift = _gift(frequency: 'Weekly');
       expect(GiftTracking.isDue(gift, monday), isTrue);
       expect(GiftTracking.isDue(gift, tuesday), isTrue);
+      expect(GiftTracking.isDueToday(gift, monday), isFalse);
+      expect(GiftTracking.isDueToday(gift, tuesday), isFalse);
 
       final completedMonday = gift.copyWith(
         completionDates: [GiftTracking.dateKey(monday)],
@@ -78,6 +80,7 @@ void main() {
       final gift = _gift(frequency: 'Monthly');
       expect(GiftTracking.isDue(gift, firstOfMonth), isTrue);
       expect(GiftTracking.isDue(gift, midMonth), isTrue);
+      expect(GiftTracking.isDueToday(gift, midMonth), isFalse);
 
       final completedEarly = gift.copyWith(
         completionDates: [GiftTracking.dateKey(firstOfMonth)],
@@ -93,6 +96,34 @@ void main() {
       final done = GiftTracking.applyCompletion(active, completedAt: monday);
       expect(GiftTracking.isDue(done, tuesday), isFalse);
       expect(done.status, GiftStatus.completed);
+    });
+  });
+
+  group('isDueToday', () {
+    test('daily gift is due today when not completed', () {
+      expect(GiftTracking.isDueToday(_gift(), monday), isTrue);
+    });
+
+    test('weekly gift with weekday is due today on that day only', () {
+      final gift = _gift(frequency: 'Weekly', daysOfWeek: ['Monday']);
+      expect(GiftTracking.isDueToday(gift, monday), isTrue);
+      expect(GiftTracking.isDueToday(gift, tuesday), isTrue); // overdue
+      expect(
+        GiftTracking.isDueToday(
+          gift.copyWith(completionDates: [GiftTracking.dateKey(monday)]),
+          tuesday,
+        ),
+        isFalse,
+      );
+    });
+
+    test('monthly gift with dueDate is due today on or after that day', () {
+      final gift = _gift(
+        frequency: 'Monthly',
+        dueDate: DateTime(2026, 7, 15),
+      );
+      expect(GiftTracking.isDueToday(gift, firstOfMonth), isFalse);
+      expect(GiftTracking.isDueToday(gift, midMonth), isTrue);
     });
   });
 

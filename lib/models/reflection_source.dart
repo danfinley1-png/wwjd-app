@@ -6,6 +6,7 @@ class ReflectionSource {
   static const wisdomSession = 'wisdom_session';
   static const giftActivity = 'gift_activity';
   static const sharedJourney = 'shared_journey';
+  static const service = 'service';
 
   static String label(String? source) {
     switch (source) {
@@ -15,6 +16,8 @@ class ReflectionSource {
         return 'Sharing My Gifts';
       case sharedJourney:
         return 'Walk Together';
+      case service:
+        return 'Service Hours';
       default:
         return 'Private reflection';
     }
@@ -23,6 +26,7 @@ class ReflectionSource {
   static bool hasNavigableSource(String? source) {
     return source == wisdomSession ||
         source == giftActivity ||
-        source == sharedJourney;
+        source == sharedJourney ||
+        source == service;
   }
 }

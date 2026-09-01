@@ -2,29 +2,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../admin/models/organization.dart';
+import '../admin/models/service_hours.dart';
+import '../admin/providers/admin_providers.dart';
 import '../core/app_colors.dart';
-import '../core/catholic_prayers/prayer_gift_link.dart';
 import '../core/gift_list_filter.dart';
 import '../core/gift_tracking.dart';
-import '../core/gift_reminder_utils.dart';
-import '../core/group_practice_tracking.dart';
-import '../core/mobile_touch.dart';
+import '../core/gift_workspace.dart';
 import '../core/providers/app_providers.dart';
-import '../core/services/gift_service.dart';
-import '../core/services/group_practice_service.dart';
 import '../core/responsive_layout.dart';
-import '../admin/models/organization.dart';
-import '../admin/providers/admin_providers.dart';
 import '../create_activity_dialog.dart';
 import '../models/gift_activity.dart';
-import '../models/gift_status.dart';
 import '../models/group_practice_instance.dart';
-import '../widgets/auth_layout.dart';
-import '../widgets/share_actions_bar.dart';
-import '../widgets/group_brand_mark.dart';
-import '../widgets/profile_avatar.dart';
+import '../widgets/gifts_workspace_tiles.dart';
+import '../widgets/member_service_projects_section.dart';
 import 'activity_detail_screen.dart';
+import 'gift_done_detail_screen.dart';
 import 'group_practice_detail_screen.dart';
+import 'service_hour_done_detail_screen.dart';
 
 class SharingMyGiftsScreen extends ConsumerStatefulWidget {
   const SharingMyGiftsScreen({super.key});
@@ -34,10 +29,14 @@ class SharingMyGiftsScreen extends ConsumerStatefulWidget {
       _SharingMyGiftsScreenState();
 }
 
-class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen> {
+class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen>
+    with TickerProviderStateMixin {
   GiftFilterKind _filterKind = GiftFilterKind.all;
   String? _filterOrgId;
   String? _filterGroupId;
+  GiftDoneRange _doneRange = GiftDoneRange.thisWeek;
+  GiftScheduleFilter _scheduleFilter = GiftScheduleFilter.dueToday;
+  late final TabController _tabController;
 
   GiftListFilter get _filter {
     switch (_filterKind) {
@@ -51,6 +50,19 @@ class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen> {
         return GiftListFilter.group(_filterGroupId ?? '');
     }
   }
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 4, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
   void _openCreateActivityDialog() {
     showDialog(
       context: context,
@@ -135,12 +147,70 @@ class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen> {
     }
   }
 
+  void _openGift(GiftActivity gift) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ActivityDetailScreen(
+          activity: gift,
+          onUpdate: (updated) {
+            ref.read(giftServiceProvider).saveGift(updated);
+          },
+        ),
+      ),
+    );
+  }
+
+  void _openPractice(GroupPracticeInstance practice) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GroupPracticeDetailScreen(practice: practice),
+      ),
+    );
+  }
+
+  void _openDoneRow(GiftDoneRow row) {
+    if (row.gift != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => GiftDoneDetailScreen(
+            gift: row.gift!,
+            completedOn: row.completedOn,
+          ),
+        ),
+      );
+      return;
+    }
+    if (row.practice != null) {
+      _openPractice(row.practice!);
+      return;
+    }
+    if (row.hours != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ServiceHourDoneDetailScreen(entry: row.hours!),
+        ),
+      );
+    }
+  }
+
+  void _openDueToday() {
+    setState(() => _scheduleFilter = GiftScheduleFilter.dueToday);
+    _tabController.animateTo(0);
+  }
+
+  void _openCompletedToday() {
+    setState(() => _doneRange = GiftDoneRange.today);
+    _tabController.animateTo(3);
+  }
+
   @override
   Widget build(BuildContext context) {
     final giftsAsync = ref.watch(userGiftsStreamProvider);
     final practicesAsync = ref.watch(userGroupPracticesStreamProvider);
-    final giftService = ref.watch(giftServiceProvider);
-    final groupPracticeService = ref.watch(groupPracticeServiceProvider);
     final compact = isCompactWidth(context);
     final fabClearance =
         kMinTouchTarget + MediaQuery.viewPaddingOf(context).bottom + 16;
@@ -159,10 +229,20 @@ class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen> {
         error: (err, _) => Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
-            child: Text(
-              'Error loading gifts:\n$err',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.red),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Gifts could not be loaded yet. Sign-in sometimes '
+                  'finishes a moment after the first request.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () => ref.invalidate(userGiftsStreamProvider),
+                  child: const Text('Try again'),
+                ),
+              ],
             ),
           ),
         ),
@@ -175,14 +255,12 @@ class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen> {
             data: (groupPractices) {
               final filter = _filter;
               return _buildBody(
-              context,
-              activities: filter.applyToGifts(activities),
-              groupPractices: filter.applyToPractices(groupPractices),
-              giftService: giftService,
-              groupPracticeService: groupPracticeService,
-              fabClearance: fabClearance,
-              unfilteredEmpty: activities.isEmpty && groupPractices.isEmpty,
-            );
+                context,
+                activities: filter.applyToGifts(activities),
+                groupPractices: filter.applyToPractices(groupPractices),
+                fabClearance: fabClearance,
+                compact: compact,
+              );
             },
           );
         },
@@ -209,10 +287,8 @@ class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen> {
     BuildContext context, {
     required List<GiftActivity> activities,
     required List<GroupPracticeInstance> groupPractices,
-    required GiftService giftService,
-    required GroupPracticeService groupPracticeService,
     required double fabClearance,
-    required bool unfilteredEmpty,
+    required bool compact,
   }) {
     final orgs =
         ref.watch(memberOrganizationsProvider).valueOrNull ?? const [];
@@ -224,6 +300,25 @@ class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen> {
     final profile = ref.watch(userProfileStreamProvider).valueOrNull;
     final userPhotoUrl = profile?.photoUrl;
     final photoCacheBustMs = profile?.updatedAt?.millisecondsSinceEpoch;
+    final hours =
+        ref.watch(memberHourEntriesProvider).valueOrNull ?? const <ServiceHourEntry>[];
+    final scopedHours = hours.where((entry) {
+      switch (_filterKind) {
+        case GiftFilterKind.all:
+          return true;
+        case GiftFilterKind.personal:
+          return false;
+        case GiftFilterKind.organization:
+          return _filterOrgId != null && entry.orgId == _filterOrgId;
+        case GiftFilterKind.group:
+          return true;
+      }
+    }).toList();
+    final assignedProjects =
+        ref.watch(memberAssignedServiceProjectsProvider).valueOrNull ?? const [];
+    final projectTitles = {
+      for (final project in assignedProjects) project.id: project.title,
+    };
 
     if (_filterKind == GiftFilterKind.organization &&
         _filterOrgId == null &&
@@ -244,6 +339,34 @@ class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen> {
       });
     }
 
+    final scheduleGifts = GiftWorkspace.scheduleGifts(
+      activities,
+      DateTime.now(),
+      _scheduleFilter,
+    );
+    final schedulePractices = GiftWorkspace.schedulePractices(
+      groupPractices,
+      DateTime.now(),
+      _scheduleFilter,
+    );
+    final activeGifts = GiftWorkspace.activeChallenges(activities);
+    final completedToday = GiftWorkspace.completedTodayRows(
+      gifts: activities,
+      practices: groupPractices,
+      hours: scopedHours,
+      now: DateTime.now(),
+    );
+    final dueTodayCount = GiftWorkspace.dueTodayCount(
+      gifts: activities,
+      practices: groupPractices,
+    );
+    final doneRows = GiftWorkspace.doneRows(
+      gifts: activities,
+      practices: groupPractices,
+      hours: scopedHours,
+      range: _doneRange,
+    );
+
     final filterBar = _GiftsFilterBar(
       kind: _filterKind,
       organizationId: _filterOrgId,
@@ -252,8 +375,7 @@ class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen> {
         for (final org in orgs) (id: org.id, name: org.name),
       ],
       groups: [
-        for (final g in groups)
-          (id: g.groupId, name: g.userFacingLabel),
+        for (final g in groups) (id: g.groupId, name: g.userFacingLabel),
       ],
       onKindChanged: (kind) {
         setState(() {
@@ -280,378 +402,77 @@ class _SharingMyGiftsScreenState extends ConsumerState<SharingMyGiftsScreen> {
       }),
     );
 
-    if (unfilteredEmpty) {
-      return ListView(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, fabClearance),
-        children: [
-          filterBar,
-          const SizedBox(height: 48),
-          const Icon(Icons.card_giftcard, size: 80, color: Colors.grey),
-          const SizedBox(height: 24),
-          const Text(
-            'No activities yet',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 20),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Tap + to add one, or use Add to My Gifts Plan from chat.\n'
-            'Group Gifts from your organization appear here too.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey),
-          ),
-        ],
-      );
-    }
-
-    if (activities.isEmpty && groupPractices.isEmpty) {
-      return ListView(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, fabClearance),
-        children: [
-          filterBar,
-          const SizedBox(height: 48),
-          const Icon(Icons.filter_alt_outlined, size: 64, color: Colors.grey),
-          const SizedBox(height: 16),
-          const Text(
-            'No gifts match this filter',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 18),
-          ),
-        ],
-      );
-    }
-
-    final stats = giftService.getAggregateStats(activities);
-    final todaySectionGifts = giftService.getTodaySectionGifts(activities);
-    final dueGroupPractices = groupPracticeService.getDueToday(groupPractices);
-    final activeGifts = giftService.getActiveGifts(activities);
-    final activeGroupPractices =
-        GroupPracticeTracking.activePractices(groupPractices);
-
-    final dueCount = todaySectionGifts.length + dueGroupPractices.length;
-
-    return ListView(
-      padding: EdgeInsets.fromLTRB(16, 16, 16, fabClearance),
-      children: [
-        filterBar,
-        const SizedBox(height: 16),
-        _StatsHeader(stats: stats, groupDueCount: dueGroupPractices.length),
-        const SizedBox(height: 20),
-        _SectionHeader(
-          title: 'Due Now',
-          subtitle: dueCount == 0
-              ? 'All caught up for now'
-              : '$dueCount item${dueCount == 1 ? '' : 's'} due',
-          icon: Icons.today,
-        ),
-        const SizedBox(height: 8),
-        if (dueCount == 0)
-          const _EmptySectionCard(
-            message: 'All caught up for now. Peace be with you.',
-          )
-        else ...[
-          ...todaySectionGifts.map(
-            (gift) => _GiftCard(
-              gift: gift,
-              brandLogoUrl: Organization.resolveLogoUrl(
-                organizationLogoUrl: gift.organizationId == null
-                    ? null
-                    : orgLogos[gift.organizationId],
-                fallback: gift.groupLogoUrl,
-              ),
-              userPhotoUrl: userPhotoUrl,
-              photoCacheBustMs: photoCacheBustMs,
-              giftService: giftService,
-              onComplete: () => _completeGift(gift),
-              onRemove: () => _confirmRemove(gift),
-              highlightDueToday: true,
-              showCompleteCheckbox: true,
-            ),
-          ),
-          ...dueGroupPractices.map(
-            (practice) => _GroupPracticeCard(
-              practice: practice,
-              highlightDue: true,
-              showCompleteCheckbox: true,
-              onComplete: () => _completeGroupPractice(practice),
-            ),
-          ),
-        ],
-        if (activeGroupPractices.isNotEmpty) ...[
-          const SizedBox(height: 24),
-          _SectionHeader(
-            title: 'Group Practices',
-            subtitle: '${activeGroupPractices.length} from your groups',
-            icon: Icons.groups_outlined,
-          ),
-          const SizedBox(height: 8),
-          ...activeGroupPractices.map(
-            (practice) => _GroupPracticeCard(
-              practice: practice,
-              highlightDue: dueGroupPractices.any((d) => d.id == practice.id),
-              showCompleteCheckbox: false,
-              onComplete: () => _completeGroupPractice(practice),
-            ),
-          ),
-        ],
-        const SizedBox(height: 24),
-        _SectionHeader(
-          title: 'Active Gifts',
-          subtitle: '${activeGifts.length} in your plan',
-          icon: Icons.favorite_outline,
-        ),
-        const SizedBox(height: 8),
-        if (activeGifts.isEmpty)
-          const _EmptySectionCard(
-            message:
-                'No active gifts. Completed or paused items are hidden here.',
-          )
-        else ...[
-          ...activeGifts.map(
-            (gift) => _GiftCard(
-              gift: gift,
-              brandLogoUrl: Organization.resolveLogoUrl(
-                organizationLogoUrl: gift.organizationId == null
-                    ? null
-                    : orgLogos[gift.organizationId],
-                fallback: gift.groupLogoUrl,
-              ),
-              userPhotoUrl: userPhotoUrl,
-              photoCacheBustMs: photoCacheBustMs,
-              giftService: giftService,
-              onComplete: () => _completeGift(gift),
-              onRemove: () => _confirmRemove(gift),
-              highlightDueToday:
-                  todaySectionGifts.any((t) => t.id == gift.id),
-              showCompleteCheckbox: false,
-            ),
-          ),
-        ],
-        if (_completedOrPaused(activities).isNotEmpty) ...[
-          const SizedBox(height: 24),
-          _SectionHeader(
-            title: 'Completed & Paused',
-            subtitle: '${_completedOrPaused(activities).length} items',
-            icon: Icons.inventory_2_outlined,
-          ),
-          const SizedBox(height: 8),
-          ..._completedOrPaused(activities).map(
-            (gift) => _CompletedGiftTile(
-              gift: gift,
-              giftService: giftService,
-              userPhotoUrl: userPhotoUrl,
-              photoCacheBustMs: photoCacheBustMs,
-              brandLogoUrl: Organization.resolveLogoUrl(
-                organizationLogoUrl: gift.organizationId == null
-                    ? null
-                    : orgLogos[gift.organizationId],
-                fallback: gift.groupLogoUrl,
-              ),
-              onRemove: () => _confirmRemove(gift),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  List<GiftActivity> _completedOrPaused(List<GiftActivity> gifts) {
-    return gifts
-        .where(
-          (g) =>
-              g.status == GiftStatus.completed || g.status == GiftStatus.paused,
-        )
-        .toList();
-  }
-
-  Future<void> _confirmRemove(GiftActivity activity) async {
-    final choice = await showDialog<String>(
-      context: context,
-      builder: (ctx) => ResponsiveAuthDialog(
-        title: const Text('Remove Activity?'),
-        content: Text(
-          'What would you like to do with "${activity.title}"?',
-        ),
-        actions: AuthDialogActions(
-          actions: [
-            OutlinedButton.icon(
-              onPressed: () => Navigator.pop(ctx, 'history'),
-              icon: const Icon(Icons.history),
-              label: const Text('Move to My History'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, 'delete'),
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Delete Permanently'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (choice == null || !mounted) return;
-
-    try {
-      if (choice == 'history') {
-        final added = await ref.read(giftServiceProvider).moveToHistory(
-              activity,
-              ref.read(historyServiceProvider),
-            );
-        await ref.read(sessionHistoryProvider.notifier).loadSessionFromFirebase();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                added
-                    ? 'Moved to My History'
-                    : 'Removed from gifts (already in My History)',
-              ),
-            ),
-          );
-        }
-      } else if (choice == 'delete') {
-        await ref.read(giftServiceProvider).deleteGift(activity.id);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Activity deleted permanently')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not remove activity: $e')),
-        );
-      }
-    }
-  }
-}
-
-class _StatsHeader extends StatelessWidget {
-  final GiftAggregateStats stats;
-  final int groupDueCount;
-
-  const _StatsHeader({
-    required this.stats,
-    this.groupDueCount = 0,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      color: AppColors.parchmentDark,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: AppColors.gold.withValues(alpha: 0.35)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            Expanded(
-              child: _StatChip(
-                label: 'Due now',
-                value: groupDueCount > 0
-                    ? '${stats.completedTodayCount}/${stats.dueTodayCount + groupDueCount}'
-                    : '${stats.completedTodayCount}/${stats.dueTodayCount}',
-                icon: Icons.check_circle_outline,
-              ),
-            ),
-            Expanded(
-              child: _StatChip(
-                label: 'Total',
-                value: '${stats.totalCompletions}',
-                icon: Icons.auto_awesome,
-              ),
-            ),
-            Expanded(
-              child: _StatChip(
-                label: 'Best streak',
-                value: stats.bestStreak > 0 ? '${stats.bestStreak}d' : '—',
-                icon: Icons.local_fire_department_outlined,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-
-  const _StatChip({
-    required this.label,
-    required this.value,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Icon(icon, size: 20, color: AppColors.primaryMaroon),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-            color: AppColors.textPrimary,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: filterBar,
+        ),
+        Material(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          child: TabBar(
+            controller: _tabController,
+            isScrollable: compact,
+            tabAlignment: compact ? TabAlignment.start : TabAlignment.fill,
+            labelColor: AppColors.primaryMaroon,
+            unselectedLabelColor: AppColors.textSecondary,
+            indicatorColor: AppColors.gold,
+            tabs: const [
+              Tab(text: 'Schedule'),
+              Tab(text: 'Service'),
+              Tab(text: 'Active'),
+              Tab(text: 'Done'),
+            ],
           ),
         ),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+        GiftsDueCompletedStatusLine(
+          dueTodayCount: dueTodayCount,
+          completedTodayCount: completedToday.length,
+          onDueTodayTap: _openDueToday,
+          onCompletedTodayTap: _openCompletedToday,
         ),
-      ],
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-
-  const _SectionHeader({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: AppColors.primaryMaroon, size: 22),
-        const SizedBox(width: 8),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: TabBarView(
+            controller: _tabController,
             children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
+              _ScheduleTab(
+                gifts: scheduleGifts,
+                practices: schedulePractices,
+                filter: _scheduleFilter,
+                orgLogos: orgLogos,
+                userPhotoUrl: userPhotoUrl,
+                photoCacheBustMs: photoCacheBustMs,
+                fabClearance: fabClearance,
+                onFilterChanged: (filter) =>
+                    setState(() => _scheduleFilter = filter),
+                onCompleteGift: _completeGift,
+                onCompletePractice: _completeGroupPractice,
+                onOpenGift: _openGift,
+                onOpenPractice: _openPractice,
               ),
-              Text(
-                subtitle,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppColors.textSecondary,
-                ),
+              _ServiceTab(
+                filterKind: _filterKind,
+                filterOrgId: _filterOrgId,
+                filterGroupId: _filterGroupId,
+                fabClearance: fabClearance,
+              ),
+              _ActiveTab(
+                gifts: activeGifts,
+                orgLogos: orgLogos,
+                userPhotoUrl: userPhotoUrl,
+                photoCacheBustMs: photoCacheBustMs,
+                fabClearance: fabClearance,
+                onCompleteGift: _completeGift,
+                onOpenGift: _openGift,
+              ),
+              _DoneTab(
+                rows: doneRows,
+                range: _doneRange,
+                projectTitles: projectTitles,
+                fabClearance: fabClearance,
+                onRangeChanged: (range) => setState(() => _doneRange = range),
+                onOpenRow: _openDoneRow,
               ),
             ],
           ),
@@ -661,410 +482,267 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-class _EmptySectionCard extends StatelessWidget {
-  final String message;
+class _ScheduleTab extends StatelessWidget {
+  const _ScheduleTab({
+    required this.gifts,
+    required this.practices,
+    required this.filter,
+    required this.orgLogos,
+    required this.userPhotoUrl,
+    required this.photoCacheBustMs,
+    required this.fabClearance,
+    required this.onFilterChanged,
+    required this.onCompleteGift,
+    required this.onCompletePractice,
+    required this.onOpenGift,
+    required this.onOpenPractice,
+  });
 
-  const _EmptySectionCard({required this.message});
+  final List<GiftActivity> gifts;
+  final List<GroupPracticeInstance> practices;
+  final GiftScheduleFilter filter;
+  final Map<String, String?> orgLogos;
+  final String? userPhotoUrl;
+  final int? photoCacheBustMs;
+  final double fabClearance;
+  final ValueChanged<GiftScheduleFilter> onFilterChanged;
+  final ValueChanged<GiftActivity> onCompleteGift;
+  final ValueChanged<GroupPracticeInstance> onCompletePractice;
+  final ValueChanged<GiftActivity> onOpenGift;
+  final ValueChanged<GroupPracticeInstance> onOpenPractice;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Text(
-          message,
-          style: const TextStyle(color: AppColors.textSecondary),
+    return ListView(
+      padding: EdgeInsets.fromLTRB(16, 8, 16, fabClearance),
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final option in GiftScheduleFilter.values)
+              ChoiceChip(
+                label: Text(_filterLabel(option)),
+                selected: filter == option,
+                onSelected: (_) => onFilterChanged(option),
+              ),
+          ],
         ),
-      ),
+        const SizedBox(height: 12),
+        if (gifts.isEmpty && practices.isEmpty)
+          Text(
+            _emptyMessage(filter),
+            style: const TextStyle(color: AppColors.textSecondary),
+          )
+        else ...[
+          for (final practice in practices)
+            GiftsPracticeWorkTile(
+              practice: practice,
+              brandLogoUrl: orgLogos[practice.organizationId],
+              onComplete: () => onCompletePractice(practice),
+              onOpen: () => onOpenPractice(practice),
+            ),
+          for (final gift in gifts)
+            GiftsWorkTile(
+              gift: gift,
+              brandLogoUrl: Organization.resolveLogoUrl(
+                organizationLogoUrl: gift.organizationId == null
+                    ? null
+                    : orgLogos[gift.organizationId],
+                fallback: gift.groupLogoUrl,
+              ),
+              userPhotoUrl: userPhotoUrl,
+              photoCacheBustMs: photoCacheBustMs,
+              onComplete: () => onCompleteGift(gift),
+              onOpen: () => onOpenGift(gift),
+            ),
+        ],
+      ],
+    );
+  }
+
+  static String _filterLabel(GiftScheduleFilter filter) {
+    switch (filter) {
+      case GiftScheduleFilter.dueToday:
+        return 'Due today';
+      case GiftScheduleFilter.thisWeek:
+        return 'This week';
+      case GiftScheduleFilter.allScheduled:
+        return 'All scheduled';
+    }
+  }
+
+  static String _emptyMessage(GiftScheduleFilter filter) {
+    switch (filter) {
+      case GiftScheduleFilter.dueToday:
+        return 'Nothing due today. Open This week or All scheduled for later Gifts.';
+      case GiftScheduleFilter.thisWeek:
+        return 'Nothing scheduled this week in this filter.';
+      case GiftScheduleFilter.allScheduled:
+        return 'No recurring Gifts or reminders in this filter. '
+            'One-time items without a reminder live on Active.';
+    }
+  }
+}
+
+class _ServiceTab extends StatelessWidget {
+  const _ServiceTab({
+    required this.filterKind,
+    required this.filterOrgId,
+    required this.filterGroupId,
+    required this.fabClearance,
+  });
+
+  final GiftFilterKind filterKind;
+  final String? filterOrgId;
+  final String? filterGroupId;
+  final double fabClearance;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, fabClearance),
+      children: [
+        if (filterKind == GiftFilterKind.personal)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Service projects belong to organizations and groups. '
+              'Choose All, By Organization, or By Group to see assignments.',
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+          )
+        else
+          MemberServiceProjectsSection(
+            filterKind: filterKind,
+            filterOrgId: filterOrgId,
+            filterGroupId: filterGroupId,
+            showHeader: false,
+          ),
+      ],
     );
   }
 }
 
-class _GiftCard extends StatelessWidget {
-  final GiftActivity gift;
-  final GiftService giftService;
-  final VoidCallback onComplete;
-  final VoidCallback onRemove;
-  final bool highlightDueToday;
-  final bool showCompleteCheckbox;
-  final String? brandLogoUrl;
-  final String? userPhotoUrl;
-  final int? photoCacheBustMs;
-
-  const _GiftCard({
-    required this.gift,
-    required this.giftService,
-    required this.onComplete,
-    required this.onRemove,
-    this.highlightDueToday = false,
-    this.showCompleteCheckbox = false,
-    this.brandLogoUrl,
-    this.userPhotoUrl,
-    this.photoCacheBustMs,
+class _ActiveTab extends StatelessWidget {
+  const _ActiveTab({
+    required this.gifts,
+    required this.orgLogos,
+    required this.userPhotoUrl,
+    required this.photoCacheBustMs,
+    required this.fabClearance,
+    required this.onCompleteGift,
+    required this.onOpenGift,
   });
 
-  void _open(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ActivityDetailScreen(
-          activity: gift,
-          onUpdate: (updated) {
-            giftService.saveGift(updated);
-          },
-        ),
-      ),
-    );
-  }
+  final List<GiftActivity> gifts;
+  final Map<String, String?> orgLogos;
+  final String? userPhotoUrl;
+  final int? photoCacheBustMs;
+  final double fabClearance;
+  final ValueChanged<GiftActivity> onCompleteGift;
+  final ValueChanged<GiftActivity> onOpenGift;
 
   @override
   Widget build(BuildContext context) {
-    final doneInPeriod = GiftTracking.isCompletedInPeriod(gift);
-    final dueLabel = GiftTracking.dueStatusLabel(gift);
-    final completeLabel = GiftTracking.completeActionLabel(gift);
-    final isDue = GiftTracking.isDue(gift);
-    final description = gift.description.trim();
-
-    Widget leading;
-    if (showCompleteCheckbox) {
-      leading = SizedBox(
-        width: touchTargetMin(context),
-        height: touchTargetMin(context),
-        child: Checkbox(
-          value: doneInPeriod,
-          onChanged: doneInPeriod ? null : (_) => onComplete(),
-          materialTapTargetSize: MaterialTapTargetSize.padded,
-        ),
-      );
-    } else if (gift.isGroupGift) {
-      leading = GroupBrandMark(
-        groupName: gift.brandLabel,
-        logoUrl: brandLogoUrl ?? gift.groupLogoUrl,
-        orgId: gift.organizationId,
-      );
-    } else {
-      leading = _UserGiftAvatar(
-        photoUrl: userPhotoUrl,
-        cacheBustMs: photoCacheBustMs,
-        radius: 20,
-      );
-    }
-
-    final meta = [
-      if (gift.isGroupGift) gift.brandLabel,
-      gift.frequency,
-      if (!gift.isGroupGift && gift.currentStreak > 0)
-        '${gift.currentStreak}-day streak',
-      if (gift.totalCompletions > 0)
-        '${gift.totalCompletions} completion${gift.totalCompletions == 1 ? '' : 's'}',
-      if (dueLabel.isNotEmpty) dueLabel,
-      if (gift.hasReminder && gift.specificTime != null)
-        'Reminder: ${GiftReminderUtils.formatDisplayTime(gift.specificTime)}',
-    ].join(' · ');
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      color: showCompleteCheckbox && doneInPeriod
-          ? AppColors.success.withValues(alpha: 0.08)
-          : null,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: highlightDueToday && isDue
-            ? BorderSide(color: AppColors.gold.withValues(alpha: 0.6))
-            : BorderSide.none,
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            onTap: () => _open(context),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 8, 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  leading,
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            if (showCompleteCheckbox && gift.isGroupGift) ...[
-                              GroupBrandMark(
-                                groupName: gift.brandLabel,
-                                logoUrl: brandLogoUrl ?? gift.groupLogoUrl,
-                                orgId: gift.organizationId,
-                                size: 28,
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            if (showCompleteCheckbox && !gift.isGroupGift) ...[
-                              _UserGiftAvatar(
-                                photoUrl: userPhotoUrl,
-                                cacheBustMs: photoCacheBustMs,
-                                radius: 14,
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            Expanded(
-                              child: Text(
-                                gift.title,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                  decoration: showCompleteCheckbox &&
-                                          doneInPeriod
-                                      ? TextDecoration.lineThrough
-                                      : null,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (meta.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            meta,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                        if (description.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            description,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              height: 1.45,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.only(top: 4),
-                    child: Icon(Icons.chevron_right),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (isDue && !doneInPeriod)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: onComplete,
-                  icon: const Icon(Icons.check),
-                  label: Text(completeLabel),
-                  style: mobileTextButtonStyle(context),
-                ),
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 8, 12),
-            child: ShareActionsBar(
-              question: gift.shareQuestion,
-              response: gift.shareBody,
-              title: gift.title,
-              giftDescription: gift.description,
-              linkedActivityId: gift.id,
-              linkedPrayerId: PrayerGiftLink.resolvePrayerId(gift),
-              isGiftActivity: true,
-              onDelete: onRemove,
-              deleteTooltip: 'Remove activity',
-            ),
+    if (gifts.isEmpty) {
+      return ListView(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, fabClearance),
+        children: const [
+          Text(
+            'No open items without a cadence or reminder. Recurring Gifts stay on Schedule.',
+            style: TextStyle(color: AppColors.textSecondary),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _GroupPracticeCard extends StatelessWidget {
-  final GroupPracticeInstance practice;
-  final bool highlightDue;
-  final bool showCompleteCheckbox;
-  final VoidCallback onComplete;
-
-  const _GroupPracticeCard({
-    required this.practice,
-    required this.onComplete,
-    this.highlightDue = false,
-    this.showCompleteCheckbox = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final summary = GroupPracticeTracking.timesSummary(practice);
-    final dueNow = GroupPracticeTracking.isDueNow(practice);
-    final nextSlot = GroupPracticeTracking.nextDueSlotLabel(practice);
-    final todaySlots = GroupPracticeTracking.slotsForDate(
-      practice,
-      DateTime.now(),
-    );
-    final allTodayDone =
-        !dueNow && todaySlots.isNotEmpty && todaySlots.every(practice.completionSlots.contains);
-
-    Widget leading;
-    if (showCompleteCheckbox) {
-      leading = SizedBox(
-        width: touchTargetMin(context),
-        height: touchTargetMin(context),
-        child: Checkbox(
-          value: allTodayDone,
-          onChanged: allTodayDone ? null : (_) => onComplete(),
-          materialTapTargetSize: MaterialTapTargetSize.padded,
-        ),
       );
-    } else {
-      leading = const Icon(Icons.groups_outlined, color: AppColors.primaryMaroon);
     }
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: highlightDue && dueNow
-            ? BorderSide(color: AppColors.gold.withValues(alpha: 0.6))
-            : BorderSide.none,
-      ),
-      child: ListTile(
-        leading: leading,
-        title: Text(
-          practice.title,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        isThreeLine: practice.description.trim().isNotEmpty,
-        subtitle: Text(
-          [
-            if (practice.groupName != null) practice.groupName!,
-            summary,
-            if (dueNow) 'Due: $nextSlot',
-            if (practice.description.trim().isNotEmpty)
-              practice.description.trim(),
-          ].join('\n'),
-          maxLines: 4,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: dueNow
-            ? TextButton(
-                onPressed: onComplete,
-                child: const Text('Complete'),
-              )
-            : const Icon(Icons.chevron_right),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => GroupPracticeDetailScreen(practice: practice),
+    return ListView(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, fabClearance),
+      children: [
+        for (final gift in gifts)
+          GiftsWorkTile(
+            gift: gift,
+            brandLogoUrl: Organization.resolveLogoUrl(
+              organizationLogoUrl: gift.organizationId == null
+                  ? null
+                  : orgLogos[gift.organizationId],
+              fallback: gift.groupLogoUrl,
             ),
-          );
-        },
-      ),
+            userPhotoUrl: userPhotoUrl,
+            photoCacheBustMs: photoCacheBustMs,
+            onComplete: () => onCompleteGift(gift),
+            onOpen: () => onOpenGift(gift),
+          ),
+      ],
     );
   }
 }
 
-class _UserGiftAvatar extends StatelessWidget {
-  const _UserGiftAvatar({
-    required this.photoUrl,
-    required this.radius,
-    this.cacheBustMs,
+class _DoneTab extends StatelessWidget {
+  const _DoneTab({
+    required this.rows,
+    required this.range,
+    required this.projectTitles,
+    required this.fabClearance,
+    required this.onRangeChanged,
+    required this.onOpenRow,
   });
 
-  final String? photoUrl;
-  final double radius;
-  final int? cacheBustMs;
+  final List<GiftDoneRow> rows;
+  final GiftDoneRange range;
+  final Map<String, String> projectTitles;
+  final double fabClearance;
+  final ValueChanged<GiftDoneRange> onRangeChanged;
+  final ValueChanged<GiftDoneRow> onOpenRow;
 
   @override
   Widget build(BuildContext context) {
-    return ProfileAvatar(
-      photoUrl: photoUrl,
-      radius: radius,
-      cacheBustMs: cacheBustMs,
-      loadFromStorageWhenEmpty: true,
+    return ListView(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, fabClearance),
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final option in GiftDoneRange.values)
+              ChoiceChip(
+                label: Text(_rangeLabel(option)),
+                selected: range == option,
+                onSelected: (_) => onRangeChanged(option),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (rows.isEmpty)
+          const Text(
+            'No completed Gifts or counted service hours in this range.',
+            style: TextStyle(color: AppColors.textSecondary),
+          )
+        else
+          for (final row in rows)
+            GiftsDoneTile(
+              row: row,
+              projectTitle: row.hours == null
+                  ? null
+                  : projectTitles[row.hours!.projectId],
+              onOpen: () => onOpenRow(row),
+            ),
+      ],
     );
   }
-}
 
-class _CompletedGiftTile extends StatelessWidget {
-  final GiftActivity gift;
-  final GiftService giftService;
-  final VoidCallback onRemove;
-  final String? brandLogoUrl;
-  final String? userPhotoUrl;
-  final int? photoCacheBustMs;
-
-  const _CompletedGiftTile({
-    required this.gift,
-    required this.giftService,
-    required this.onRemove,
-    this.brandLogoUrl,
-    this.userPhotoUrl,
-    this.photoCacheBustMs,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final description = gift.description.trim();
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: gift.isGroupGift
-            ? GroupBrandMark(
-                groupName: gift.brandLabel,
-                logoUrl: brandLogoUrl ?? gift.groupLogoUrl,
-                orgId: gift.organizationId,
-                size: 36,
-              )
-            : _UserGiftAvatar(
-                photoUrl: userPhotoUrl,
-                cacheBustMs: photoCacheBustMs,
-                radius: 18,
-              ),
-        title: Text(
-          gift.title,
-          style: const TextStyle(decoration: TextDecoration.lineThrough),
-        ),
-        isThreeLine: description.isNotEmpty,
-        subtitle: Text(
-          [
-            if (gift.isGroupGift) gift.brandLabel,
-            gift.status.firestoreValue,
-            if (description.isNotEmpty) description,
-          ].join('\n'),
-          maxLines: 5,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: IconButton(
-          icon: const Icon(Icons.delete_outline),
-          onPressed: onRemove,
-        ),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ActivityDetailScreen(
-                activity: gift,
-                onUpdate: (updated) {
-                  giftService.saveGift(updated);
-                },
-              ),
-            ),
-          );
-        },
-      ),
-    );
+  static String _rangeLabel(GiftDoneRange range) {
+    switch (range) {
+      case GiftDoneRange.today:
+        return 'Today';
+      case GiftDoneRange.thisWeek:
+        return 'This week';
+      case GiftDoneRange.thisSemester:
+        return 'This semester';
+      case GiftDoneRange.all:
+        return 'All';
+    }
   }
 }
 
@@ -1112,8 +790,7 @@ class _GiftsFilterBar extends StatelessWidget {
               ChoiceChip(
                 label: const Text('By Organization'),
                 selected: kind == GiftFilterKind.organization,
-                onSelected: (_) =>
-                    onKindChanged(GiftFilterKind.organization),
+                onSelected: (_) => onKindChanged(GiftFilterKind.organization),
               ),
             if (groups.isNotEmpty)
               ChoiceChip(

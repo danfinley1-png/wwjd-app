@@ -25,6 +25,9 @@ import 'group_schedules_screen.dart';
 import 'invite_members_screen.dart';
 import 'org_pastoral_insights_screen.dart';
 import 'org_calendar_admin_screen.dart';
+import 'org_service_projects_screen.dart';
+import 'org_service_proposals_screen.dart';
+import 'edit_service_project_screen.dart';
 
 class OrganizationDetailScreen extends ConsumerWidget {
   const OrganizationDetailScreen({
@@ -51,7 +54,7 @@ class OrganizationDetailScreen extends ConsumerWidget {
         }
 
         return DefaultTabController(
-          length: 4,
+          length: 6,
           child: Scaffold(
             appBar: AppBar(
               title: Text(org.name, overflow: TextOverflow.ellipsis),
@@ -93,6 +96,8 @@ class OrganizationDetailScreen extends ConsumerWidget {
                 tabs: const [
                   Tab(text: 'Groups'),
                   Tab(text: 'Members'),
+                  Tab(text: 'Service projects'),
+                  Tab(text: 'Proposed projects'),
                   Tab(text: 'Organization invites'),
                   Tab(text: 'Group invites'),
                 ],
@@ -112,6 +117,14 @@ class OrganizationDetailScreen extends ConsumerWidget {
                   orgName: org.name,
                   isAdmin: isAdmin,
                   canManageGroups: canManageGroups,
+                ),
+                OrgServiceProjectsPanel(
+                  orgId: orgId,
+                  organizationName: org.name,
+                ),
+                OrgServiceProposalsPanel(
+                  orgId: orgId,
+                  organizationName: org.name,
                 ),
                 _InvitesTab(orgId: orgId, isAdmin: isAdmin),
                 _GroupInvitesTab(orgId: orgId, isAdmin: isAdmin),
@@ -277,6 +290,29 @@ class _GroupsTab extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 12),
+            if (isAdmin)
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.volunteer_activism_outlined),
+                  title: const Text('Service projects'),
+                  subtitle: const Text(
+                    'Create volunteer projects and assign them to groups — not personal Gifts.',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => EditServiceProjectScreen(
+                          orgId: orgId,
+                          organizationName: orgName,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            if (isAdmin) const SizedBox(height: 12),
             Text(
               'Groups organize members and scope anonymized Pastoral Insights within this organization.',
               style: TextStyle(color: Colors.grey.shade700, height: 1.45),

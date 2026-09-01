@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
+import '../../core/services/service_hour_entry_service.dart';
 import '../config/admin_config.dart';
 import '../models/admin_role.dart';
 import '../models/group_membership_invite.dart';
@@ -21,7 +22,9 @@ import '../utils/group_gift_share_access.dart';
 import '../services/org_logo_service.dart';
 import '../services/org_calendar_service.dart';
 import '../services/platform_admin_service.dart';
+import '../services/service_project_service.dart';
 import '../services/usage_report_service.dart';
+import '../models/service_hours.dart';
 
 final organizationServiceProvider = Provider<OrganizationService>((ref) {
   return OrganizationService();
@@ -53,6 +56,90 @@ final groupGiftServiceProvider = Provider<GroupGiftService>((ref) {
 
 final orgCalendarServiceProvider = Provider<OrgCalendarService>((ref) {
   return OrgCalendarService();
+});
+
+final serviceProjectServiceProvider = Provider<ServiceProjectService>((ref) {
+  return ServiceProjectService();
+});
+
+final organizationServiceProjectsProvider =
+    StreamProvider.family<List<ServiceProject>, String>((ref, orgId) {
+  ref.watch(authStateProvider);
+  return ref.watch(serviceProjectServiceProvider).watchForOrganization(orgId);
+});
+
+/// Active service projects assigned to the signed-in user's accepted orgs/groups.
+///
+/// User mode previously never queried [ServiceProject.collection] — only Admin
+/// used [organizationServiceProjectsProvider].
+final memberAssignedServiceProjectsProvider =
+    StreamProvider<List<ServiceProject>>((ref) {
+  final user = ref.watch(authStateProvider).valueOrNull;
+  if (user == null) return Stream.value(const []);
+
+  final orgsAsync = ref.watch(memberOrganizationsProvider);
+  if (orgsAsync.isLoading) {
+    return Stream<List<ServiceProject>>.multi((_) {});
+  }
+  if (orgsAsync.hasError) {
+    return Stream.error(
+      orgsAsync.error!,
+      orgsAsync.stackTrace ?? StackTrace.current,
+    );
+  }
+
+  final orgs = orgsAsync.valueOrNull ?? const [];
+  if (orgs.isEmpty) return Stream.value(const []);
+
+  final profileGroups =
+      ref.watch(profileGroupMembershipsProvider).valueOrNull ?? const [];
+
+  final scopes = [
+    for (final org in orgs)
+      MemberServiceProjectScope(
+        orgId: org.id,
+        groupIds: {
+          ...?ref.watch(organizationMembershipProvider(org.id)).valueOrNull?.groupIds,
+          for (final group in profileGroups)
+            if (group.organizationId == org.id) group.groupId,
+        }.toList(),
+      ),
+  ];
+
+  return ref
+      .watch(serviceProjectServiceProvider)
+      .watchAssignedActiveForMember(scopes);
+});
+
+final serviceHourEntryServiceProvider = Provider<ServiceHourEntryService>((ref) {
+  return ServiceHourEntryService();
+});
+
+/// The signed-in member's own hour entries across projects (Done tab).
+final memberHourEntriesProvider = StreamProvider<List<ServiceHourEntry>>((ref) {
+  ref.watch(authStateProvider);
+  return ref.watch(serviceHourEntryServiceProvider).watchMine();
+});
+
+final serviceProjectByIdProvider =
+    FutureProvider.family<ServiceProject?, String>((ref, projectId) {
+  ref.watch(authStateProvider);
+  return ref.watch(serviceProjectServiceProvider).getById(projectId);
+});
+
+/// The signed-in member's own hour entries for one project.
+final memberProjectHourEntriesProvider =
+    StreamProvider.family<List<ServiceHourEntry>, String>((ref, projectId) {
+  ref.watch(authStateProvider);
+  return ref
+      .watch(serviceHourEntryServiceProvider)
+      .watchMineForProject(projectId);
+});
+
+final memberProposedServiceProjectsProvider =
+    StreamProvider<List<ServiceProject>>((ref) {
+  ref.watch(authStateProvider);
+  return ref.watch(serviceProjectServiceProvider).watchProposedByCurrentUser();
 });
 
 final userProvisioningServiceProvider = Provider<UserProvisioningService>((ref) {

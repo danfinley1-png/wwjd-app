@@ -83,6 +83,9 @@ class ReflectionSourceLink extends ConsumerWidget {
       case ReflectionSource.sharedJourney:
         return Icons.groups_outlined;
       case ReflectionSource.wisdomSession:
+        return Icons.menu_book_outlined;
+      case ReflectionSource.service:
+        return Icons.volunteer_activism_outlined;
       default:
         return Icons.menu_book_outlined;
     }
@@ -104,9 +107,35 @@ class ReflectionSourceLink extends ConsumerWidget {
       case ReflectionSource.wisdomSession:
         _openWisdomSession(context);
         return;
+      case ReflectionSource.service:
+        _openServiceSource(context);
+        return;
       default:
         _missingSource(context);
     }
+  }
+
+  void _openServiceSource(BuildContext context) {
+    final title = thread.linkedSourceTitle?.trim();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Service Hours'),
+        content: Text(
+          title != null && title.isNotEmpty
+              ? 'This private reflection is linked to "$title". '
+                  'Hour records stay separate from My Reflections.'
+              : 'This private reflection is linked to a service project. '
+                  'Hour records stay separate from My Reflections.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _openWisdomSession(BuildContext context) {

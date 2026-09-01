@@ -39,7 +39,13 @@ final giftReminderServiceProvider =
     Provider<GiftReminderService>((ref) => GiftReminderService.instance);
 
 final userGiftsStreamProvider = StreamProvider<List<GiftActivity>>((ref) {
-  return ref.watch(giftServiceProvider).getUserGiftsStream();
+  final auth = ref.watch(authStateProvider);
+  if (auth.isLoading) {
+    return Stream<List<GiftActivity>>.multi((_) {});
+  }
+  final user = auth.valueOrNull;
+  if (user == null) return Stream.value(const <GiftActivity>[]);
+  return ref.watch(giftServiceProvider).watchGiftsForUid(user.uid);
 });
 
 final groupPracticeServiceProvider =
@@ -47,8 +53,15 @@ final groupPracticeServiceProvider =
 
 final userGroupPracticesStreamProvider =
     StreamProvider<List<GroupPracticeInstance>>((ref) {
-  ref.watch(authStateProvider);
-  return ref.watch(groupPracticeServiceProvider).watchGroupPractices();
+  final auth = ref.watch(authStateProvider);
+  if (auth.isLoading) {
+    return Stream<List<GroupPracticeInstance>>.multi((_) {});
+  }
+  final user = auth.valueOrNull;
+  if (user == null) return Stream.value(const <GroupPracticeInstance>[]);
+  return ref.watch(groupPracticeServiceProvider).watchGroupPracticesForUid(
+        user.uid,
+      );
 });
 
 final shareServiceProvider = Provider<ShareService>((ref) => ShareService());

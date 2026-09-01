@@ -76,7 +76,8 @@ class GiftTracking {
     return f == 'once' || f == 'one-time' || f == 'one time';
   }
 
-  /// Whether the gift still needs attention in its current period.
+  /// Whether the gift still needs attention in its current period
+  /// (today / this week / this month). Wider than [isDueToday].
   static bool isDue(GiftActivity gift, [DateTime? now]) {
     final today = now ?? DateTime.now();
     if (gift.status != GiftStatus.active) return false;
@@ -103,26 +104,134 @@ class GiftTracking {
     }
   }
 
-  /// Backward-compatible alias — daily = today; weekly/monthly = current period.
-  static bool isDueToday(GiftActivity gift, [DateTime? now]) => isDue(gift, now);
+  /// Calendar due today or overdue — not "due this week" or "due this month".
+  ///
+  /// Daily: not completed today. Weekly with weekdays: today is a scheduled
+  /// day, or an earlier scheduled day this week was missed. Weekly without
+  /// weekdays: never (that is period-due only). Monthly: only when [GiftActivity.dueDate]
+  /// has a day-of-month that is today or already passed this month.
+  static bool isDueToday(GiftActivity gift, [DateTime? now]) {
+    final today = now ?? DateTime.now();
+    if (gift.status != GiftStatus.active) return false;
+    if (isCompletedInPeriod(gift, today)) return false;
+
+    switch (duePeriod(gift)) {
+      case GiftDuePeriod.daily:
+        return true;
+      case GiftDuePeriod.weekly:
+        return _weeklyDueTodayOrOverdue(gift, today);
+      case GiftDuePeriod.monthly:
+        return _monthlyDueTodayOrOverdue(gift, today);
+      case GiftDuePeriod.oneTime:
+        return _oneTimeDueTodayOrOverdue(gift, today);
+    }
+  }
+
+  static bool isDueThisWeek(GiftActivity gift, [DateTime? now]) {
+    final today = now ?? DateTime.now();
+    if (gift.status != GiftStatus.active) return false;
+    if (isCompletedInPeriod(gift, today)) return false;
+    if (isDueToday(gift, today)) return true;
+
+    switch (duePeriod(gift)) {
+      case GiftDuePeriod.daily:
+        return true;
+      case GiftDuePeriod.weekly:
+        return isDue(gift, today) || _weeklyHasRemainingDayThisWeek(gift, today);
+      case GiftDuePeriod.monthly:
+        return _monthlyDueDayFallsThisWeek(gift, today);
+      case GiftDuePeriod.oneTime:
+        if (gift.dueDate == null) return true;
+        final dueDay = DateTime(
+          gift.dueDate!.year,
+          gift.dueDate!.month,
+          gift.dueDate!.day,
+        );
+        final weekStart = _weekStart(today);
+        final weekEnd = weekStart.add(const Duration(days: 6));
+        return !dueDay.isBefore(weekStart) && !dueDay.isAfter(weekEnd);
+    }
+  }
+
+  static const _weekdayNames = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
 
   static bool _isDueWeekly(GiftActivity gift, DateTime today) {
     if (gift.daysOfWeek.isNotEmpty) {
-      final weekdayNames = [
-        'Monday',
-        'Tuesday',
-        'Wednesday',
-        'Thursday',
-        'Friday',
-        'Saturday',
-        'Sunday',
-      ];
-      final todayName = weekdayNames[today.weekday - 1];
+      final todayName = _weekdayNames[today.weekday - 1];
       return gift.daysOfWeek.any(
         (d) => d.toLowerCase() == todayName.toLowerCase(),
       );
     }
     return true;
+  }
+
+  static bool _weeklyDueTodayOrOverdue(GiftActivity gift, DateTime today) {
+    if (gift.daysOfWeek.isEmpty) return false;
+    if (_isDueWeekly(gift, today)) return true;
+    final weekStart = _weekStart(today);
+    for (var i = 0; i < today.weekday - 1; i++) {
+      if (_isDueWeekly(gift, weekStart.add(Duration(days: i)))) return true;
+    }
+    return false;
+  }
+
+  static bool _weeklyHasRemainingDayThisWeek(GiftActivity gift, DateTime today) {
+    if (gift.daysOfWeek.isEmpty) return true;
+    final weekStart = _weekStart(today);
+    for (var i = today.weekday - 1; i < 7; i++) {
+      if (_isDueWeekly(gift, weekStart.add(Duration(days: i)))) return true;
+    }
+    return false;
+  }
+
+  static int? _monthlyDueDayOfMonth(GiftActivity gift) {
+    final due = gift.dueDate;
+    if (due == null) return null;
+    return due.day;
+  }
+
+  static bool _monthlyDueTodayOrOverdue(GiftActivity gift, DateTime today) {
+    final dueDay = _monthlyDueDayOfMonth(gift);
+    if (dueDay == null) return false;
+    final lastDay = DateTime(today.year, today.month + 1, 0).day;
+    final effective = dueDay > lastDay ? lastDay : dueDay;
+    return today.day >= effective;
+  }
+
+  static bool _monthlyDueDayFallsThisWeek(GiftActivity gift, DateTime today) {
+    final dueDay = _monthlyDueDayOfMonth(gift);
+    if (dueDay == null) return false;
+    final weekStart = _weekStart(today);
+    for (var i = 0; i < 7; i++) {
+      final day = weekStart.add(Duration(days: i));
+      if (day.month != today.month || day.year != today.year) continue;
+      final lastDay = DateTime(day.year, day.month + 1, 0).day;
+      final effective = dueDay > lastDay ? lastDay : dueDay;
+      if (day.day == effective) return true;
+    }
+    return false;
+  }
+
+  static bool _oneTimeDueTodayOrOverdue(GiftActivity gift, DateTime today) {
+    if (gift.dueDate == null) {
+      return gift.hasReminder ||
+          (gift.specificTime != null && gift.specificTime!.trim().isNotEmpty);
+    }
+    final dueDay = DateTime(
+      gift.dueDate!.year,
+      gift.dueDate!.month,
+      gift.dueDate!.day,
+    );
+    final todayDay = DateTime(today.year, today.month, today.day);
+    return !todayDay.isBefore(dueDay);
   }
 
   static bool _completedInSameWeek(GiftActivity gift, DateTime today) {
@@ -152,7 +261,8 @@ class GiftTracking {
     if (isCompletedInPeriod(gift, today)) {
       return completedStatusLabel(gift, today);
     }
-    if (!isDue(gift, today)) return '';
+    if (isDueToday(gift, today)) return 'Due today';
+    if (!isDue(gift, today) && !isDueThisWeek(gift, today)) return '';
 
     switch (duePeriod(gift)) {
       case GiftDuePeriod.daily:

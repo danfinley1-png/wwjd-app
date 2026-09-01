@@ -43,6 +43,41 @@ rules_version = '2';
 //   personal gifts, chat, reflections, or history.
 // Personal spiritual collections (chat, reflections, history, personal gifts)
 // remain inaccessible to organization administrators.
+//
+// Collection: serviceProjects/{projectId}
+//   Institutional volunteer projects (not personal spiritual content)
+//   - orgId: string required, immutable
+//   - title: string 1-200
+//   - description: string <= 4000
+//   - scope, location: string optional <= 200 / 300
+//   - startDate, endDate: timestamp optional (inclusive window)
+//   - assignmentType: organization|groups
+//   - assignedGroupIds: list <= 30 (empty iff assignmentType == organization)
+//   - mode: selfReported|requiresApproval
+//   - approverUids: list <= 20 (required when live + requiresApproval)
+//   - status: active|inactive
+//   - source: admin|memberProposed (default admin for legacy docs)
+//   - proposedByUid: string optional; required when source == memberProposed
+//   - proposalStatus: none|submitted|approved|rejected|returned
+//   - proposalNote, rejectionReason: optional admin strings <= 2000
+//   - nominatedApproverUids: list <= 20 (member suggestion only)
+//   - createdBy: uid string required, immutable
+//   - createdAt: timestamp immutable
+//   - updatedAt: timestamp
+// Collection: serviceHourEntries/{entryId}
+//   Hours metadata only. NEVER store reflection body/text/journal fields.
+//   - projectId, orgId, userId: string required, immutable
+//   - source: admin|memberProposed (copied from the project at create)
+//   - date: timestamp (service day)
+//   - hours: number 0 < hours <= 24
+//   - note: string optional <= 2000 (public-to-org-admin metadata, not a reflection)
+//   - status: logged|pending|approved|rejected
+//   - submittedAt: timestamp immutable
+//   - reviewedBy, reviewedAt, reviewNote: optional; approver review only
+//   - reflectionId: optional <= 128 pointer to users/{uid}/reflections/{id}
+// Private service reflections: users/{uid}/reflections/{threadId}
+//   source == "service", linkedServiceProjectId + linkedServiceEntryId
+//   Owner-only; admins/approvers never read reflection text.
 
 service cloud.firestore {
 
@@ -268,6 +303,310 @@ service cloud.firestore {
         );
     }
 
+    function serviceProjectDoc(projectId) {
+      return get(/databases/$(database)/documents/serviceProjects/$(projectId));
+    }
+
+    function isServiceProjectApprover(p) {
+      return p.keys().hasAny(['approverUids'])
+        && p.approverUids is list
+        && request.auth.uid in p.approverUids;
+    }
+
+    function isAssignedServiceProjectAudience(p) {
+      return isOrgMember(p.orgId)
+        && (
+          p.assignmentType == 'organization'
+          || (
+            p.assignmentType == 'groups'
+            && p.assignedGroupIds is list
+            && memberGroupIds(p.orgId).hasAny(p.assignedGroupIds)
+          )
+        );
+    }
+
+    function isPublishedServiceProject(p) {
+      return p.status == 'active'
+        && p.get('proposalStatus', 'none') in ['none', 'approved'];
+    }
+
+    function isServiceProjectProposer(p) {
+      return p.keys().hasAny(['proposedByUid'])
+        && p.proposedByUid is string
+        && p.proposedByUid == request.auth.uid;
+    }
+
+    function memberProposalAssignmentAllowed(d) {
+      return d.assignmentType == 'organization'
+        || (
+          d.assignmentType == 'groups'
+          && d.assignedGroupIds is list
+          && d.assignedGroupIds.size() > 0
+          && memberGroupIds(d.orgId).hasAll(d.assignedGroupIds)
+        );
+    }
+
+    function canReadServiceProject() {
+      let p = resource.data;
+      return isSignedIn()
+        && p.orgId is string
+        && (
+          isSuperAdmin()
+          || isOrgAdmin(p.orgId)
+          || (
+            isPublishedServiceProject(p)
+            && (
+              isServiceProjectApprover(p)
+              || isAssignedServiceProjectAudience(p)
+            )
+          )
+          || isServiceProjectProposer(p)
+        );
+    }
+
+    // List rules are not filters. Own-proposal query constrains proposedByUid;
+    // org-scoped queries still use canReadServiceProject (orgId in the query).
+    function canListServiceProjects() {
+      return isSignedIn() && (
+        resource.data.proposedByUid == request.auth.uid
+        || canReadServiceProject()
+      );
+    }
+
+    function serviceProjectApproversValid(d) {
+      return d.mode == 'selfReported'
+        ? d.approverUids.size() == 0
+        : (
+          d.source == 'memberProposed'
+            && d.proposalStatus in ['submitted', 'rejected', 'returned']
+            ? d.approverUids.size() == 0
+            : d.approverUids.size() > 0
+        );
+    }
+
+    function isValidServiceProject() {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'orgId', 'title', 'description', 'scope', 'location',
+          'startDate', 'endDate', 'assignmentType', 'assignedGroupIds',
+          'mode', 'approverUids', 'status', 'createdBy', 'createdAt', 'updatedAt',
+          'source', 'proposedByUid', 'proposalStatus', 'proposalNote',
+          'rejectionReason', 'nominatedApproverUids'
+        ])
+        && d.keys().hasAll([
+          'orgId', 'title', 'description', 'assignmentType', 'assignedGroupIds',
+          'mode', 'approverUids', 'status', 'createdBy', 'createdAt', 'updatedAt',
+          'source', 'proposalStatus', 'nominatedApproverUids'
+        ])
+        && d.orgId is string && d.orgId.size() > 0 && d.orgId.size() <= 128
+        && exists(/databases/$(database)/documents/organizations/$(d.orgId))
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
+        && d.description is string && d.description.size() <= 4000
+        && (!d.keys().hasAny(['scope']) || (d.scope is string && d.scope.size() <= 200))
+        && (!d.keys().hasAny(['location']) || (d.location is string && d.location.size() <= 300))
+        && (!d.keys().hasAny(['startDate']) || d.startDate is timestamp)
+        && (!d.keys().hasAny(['endDate']) || d.endDate is timestamp)
+        && (
+          !d.keys().hasAny(['startDate'])
+          || !d.keys().hasAny(['endDate'])
+          || d.endDate >= d.startDate
+        )
+        && d.assignmentType in ['organization', 'groups']
+        && d.assignedGroupIds is list
+        && d.assignedGroupIds.size() <= 30
+        && (
+          d.assignmentType == 'organization'
+            ? d.assignedGroupIds.size() == 0
+            : d.assignedGroupIds.size() > 0
+        )
+        && d.mode in ['selfReported', 'requiresApproval']
+        && d.approverUids is list
+        && d.approverUids.size() <= 20
+        && serviceProjectApproversValid(d)
+        && d.status in ['active', 'inactive']
+        && d.source in ['admin', 'memberProposed']
+        && d.proposalStatus in ['none', 'submitted', 'approved', 'rejected', 'returned']
+        && (
+          d.source == 'admin'
+            ? (
+                d.proposalStatus == 'none'
+                && (!d.keys().hasAny(['proposedByUid']) || d.proposedByUid.size() == 0)
+              )
+            : (
+                d.proposalStatus in ['submitted', 'approved', 'rejected', 'returned']
+                && d.keys().hasAny(['proposedByUid'])
+                && d.proposedByUid is string
+                && d.proposedByUid.size() > 0
+                && d.proposedByUid.size() <= 128
+              )
+        )
+        && d.nominatedApproverUids is list
+        && d.nominatedApproverUids.size() <= 20
+        && (!d.keys().hasAny(['proposalNote']) || (d.proposalNote is string && d.proposalNote.size() <= 2000))
+        && (!d.keys().hasAny(['rejectionReason']) || (d.rejectionReason is string && d.rejectionReason.size() <= 2000))
+        && d.createdBy is string && d.createdBy.size() > 0 && d.createdBy.size() <= 128
+        && d.createdAt is timestamp
+        && d.updatedAt is timestamp;
+    }
+
+    function isValidMemberProposalCreate() {
+      let d = request.resource.data;
+      return d.source == 'memberProposed'
+        && d.proposedByUid == request.auth.uid
+        && d.createdBy == request.auth.uid
+        && d.proposalStatus == 'submitted'
+        && d.status == 'inactive'
+        && d.approverUids.size() == 0
+        && isOrgMember(d.orgId)
+        && memberProposalAssignmentAllowed(d)
+        && (!d.keys().hasAny(['proposalNote']) || d.proposalNote.size() == 0)
+        && (!d.keys().hasAny(['rejectionReason']) || d.rejectionReason.size() == 0);
+    }
+
+    function isValidAdminProjectCreate() {
+      let d = request.resource.data;
+      return d.source == 'admin'
+        && d.proposalStatus == 'none'
+        && d.createdBy == request.auth.uid
+        && isOrgAdmin(d.orgId);
+    }
+
+    function isMemberProposalResubmit() {
+      let d = request.resource.data;
+      let p = resource.data;
+      return p.get('source', 'admin') == 'memberProposed'
+        && p.proposedByUid == request.auth.uid
+        && p.proposalStatus in ['rejected', 'returned']
+        && d.source == 'memberProposed'
+        && d.proposedByUid == p.proposedByUid
+        && d.status == 'inactive'
+        && d.proposalStatus == 'submitted'
+        && d.approverUids.size() == 0
+        && isOrgMember(d.orgId)
+        && memberProposalAssignmentAllowed(d);
+    }
+
+    function serviceProjectIdentityUnchanged() {
+      return request.resource.data.orgId == resource.data.orgId
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.get('source', 'admin') == resource.data.get('source', 'admin')
+        && request.resource.data.get('proposedByUid', '') == resource.data.get('proposedByUid', '');
+    }
+
+    function timestampInServiceWindow(p, day) {
+      return day is timestamp
+        && (!p.keys().hasAny(['startDate']) || !(p.startDate is timestamp) || day >= p.startDate)
+        && (!p.keys().hasAny(['endDate']) || !(p.endDate is timestamp) || day <= p.endDate);
+    }
+
+    function isValidServiceHourEntryShape() {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'projectId', 'orgId', 'userId', 'date', 'hours', 'note', 'status',
+          'source', 'submittedAt', 'reviewedBy', 'reviewedAt', 'reviewNote',
+          'reflectionId'
+        ])
+        && d.keys().hasAll(['projectId', 'orgId', 'userId', 'date', 'hours', 'status', 'submittedAt'])
+        && d.projectId is string && d.projectId.size() > 0 && d.projectId.size() <= 128
+        && d.orgId is string && d.orgId.size() > 0 && d.orgId.size() <= 128
+        && d.userId is string && d.userId.size() > 0 && d.userId.size() <= 128
+        && d.date is timestamp
+        && d.hours is number && d.hours > 0 && d.hours <= 24
+        && d.status in ['logged', 'pending', 'approved', 'rejected']
+        && d.submittedAt is timestamp
+        && (!d.keys().hasAny(['source']) || d.source in ['admin', 'memberProposed'])
+        && (!d.keys().hasAny(['note']) || (d.note is string && d.note.size() <= 2000))
+        && (!d.keys().hasAny(['reviewedBy']) || (d.reviewedBy is string && d.reviewedBy.size() <= 128))
+        && (!d.keys().hasAny(['reviewedAt']) || d.reviewedAt is timestamp)
+        && (!d.keys().hasAny(['reviewNote']) || (d.reviewNote is string && d.reviewNote.size() <= 2000))
+        && (!d.keys().hasAny(['reflectionId']) || (d.reflectionId is string && d.reflectionId.size() <= 128))
+        && !d.keys().hasAny([
+          'reflection', 'reflectionText', 'reflectionBody', 'body', 'journal', 'privateNote'
+        ]);
+    }
+
+    function serviceHourIdentityUnchanged() {
+      return request.resource.data.projectId == resource.data.projectId
+        && request.resource.data.orgId == resource.data.orgId
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.submittedAt == resource.data.submittedAt
+        && request.resource.data.get('source', 'admin') == resource.data.get('source', 'admin');
+    }
+
+    function memberMayLogAgainstProject(p) {
+      return isPublishedServiceProject(p)
+        && isAssignedServiceProjectAudience(p)
+        && timestampInServiceWindow(p, request.resource.data.date);
+    }
+
+    function isValidServiceHourCreate() {
+      let d = request.resource.data;
+      let p = serviceProjectDoc(d.projectId).data;
+      return exists(/databases/$(database)/documents/serviceProjects/$(d.projectId))
+        && d.orgId == p.orgId
+        && d.userId == request.auth.uid
+        && memberMayLogAgainstProject(p)
+        && d.get('source', 'admin') == p.get('source', 'admin')
+        && (
+          p.mode == 'selfReported'
+            ? d.status == 'logged'
+            : d.status == 'pending'
+        )
+        && !d.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote'])
+        && (!d.keys().hasAny(['reflectionId']) || d.reflectionId.size() == 0);
+    }
+
+    function isOwnerServiceHourUpdate() {
+      let d = request.resource.data;
+      let p = serviceProjectDoc(d.projectId).data;
+      return request.auth.uid == resource.data.userId
+        && serviceHourIdentityUnchanged()
+        && (
+          (
+            resource.data.status in ['logged', 'pending']
+            && memberMayLogAgainstProject(p)
+            && d.status == resource.data.status
+            && !d.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote'])
+          )
+          || request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['reflectionId'])
+        );
+    }
+
+    function isApproverServiceHourReview() {
+      let d = request.resource.data;
+      let p = serviceProjectDoc(resource.data.projectId).data;
+      return isServiceProjectApprover(p)
+        && request.auth.uid != resource.data.userId
+        && serviceHourIdentityUnchanged()
+        && d.date == resource.data.date
+        && d.hours == resource.data.hours
+        && d.get('note', '') == resource.data.get('note', '')
+        && d.get('reflectionId', '') == resource.data.get('reflectionId', '')
+        && resource.data.status in ['pending', 'logged']
+        && d.status in ['approved', 'rejected']
+        && d.reviewedBy == request.auth.uid
+        && d.reviewedAt is timestamp;
+    }
+
+    function canReadServiceHourEntry() {
+      let d = resource.data;
+      return isSignedIn()
+        && d.userId is string
+        && d.orgId is string
+        && d.projectId is string
+        && (
+          d.userId == request.auth.uid
+          || isSuperAdmin()
+          || isOrgAdmin(d.orgId)
+          || (
+            exists(/databases/$(database)/documents/serviceProjects/$(d.projectId))
+            && isServiceProjectApprover(serviceProjectDoc(d.projectId).data)
+          )
+        );
+    }
+
     function isValidCalendarEvent(orgId) {
       let d = request.resource.data;
       return d.keys().hasOnly([
@@ -458,6 +797,11 @@ service cloud.firestore {
 
 
     // Personal spiritual data — owner only. Admins never receive cross-user access.
+    // Recursive read covers Sharing My Gifts (`users/{uid}/gifts`) and other
+    // owner subcollections. Nested matches below add group-gift write exceptions.
+    match /users/{userId}/{document=**} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+    }
 
     match /users/{userId} {
 
@@ -629,6 +973,13 @@ service cloud.firestore {
       }
 
 
+
+      match /reflections/{threadId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        match /entries/{entryId} {
+          allow read, write: if isSignedIn() && request.auth.uid == userId;
+        }
+      }
 
       match /{document=**} {
 
@@ -1009,6 +1360,39 @@ service cloud.firestore {
 
 
 
+
+
+
+    match /serviceProjects/{projectId} {
+      allow get: if canReadServiceProject();
+      allow list: if canListServiceProjects();
+      allow create: if isSignedIn()
+        && isValidServiceProject()
+        && (isValidAdminProjectCreate() || isValidMemberProposalCreate());
+      allow update: if isSignedIn()
+        && isValidServiceProject()
+        && serviceProjectIdentityUnchanged()
+        && (isOrgAdmin(resource.data.orgId) || isMemberProposalResubmit());
+      allow delete: if isSignedIn() && isOrgAdmin(resource.data.orgId);
+    }
+
+    match /serviceHourEntries/{entryId} {
+      allow read: if canReadServiceHourEntry();
+      allow create: if isSignedIn()
+        && isValidServiceHourEntryShape()
+        && isValidServiceHourCreate();
+      allow update: if isSignedIn()
+        && isValidServiceHourEntryShape()
+        && (isOwnerServiceHourUpdate() || isApproverServiceHourReview());
+      allow delete: if isSignedIn() && (
+        (
+          request.auth.uid == resource.data.userId
+          && resource.data.status in ['logged', 'pending']
+        )
+        || isOrgAdmin(resource.data.orgId)
+      );
+    }
+
     // Aggregate platform usage — counters only, no spiritual content.
     // Writers: any signed-in user (including guests). Readers: Super Admin only.
     match /platformUsage/daily/days/{dayId} {
@@ -1022,7 +1406,4 @@ service cloud.firestore {
     }
 
   }
-
 }
-
-

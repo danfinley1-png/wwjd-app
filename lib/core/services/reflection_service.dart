@@ -196,6 +196,32 @@ class ReflectionService {
 
 
 
+  Future<ReflectionThread?> findThreadForServiceEntry(String entryId) async {
+
+    final col = _threadsCol;
+
+    if (col == null) return null;
+
+
+
+    final snap = await col
+
+        .where('linkedServiceEntryId', isEqualTo: entryId.trim())
+
+        .limit(1)
+
+        .get();
+
+    if (snap.docs.isEmpty) return null;
+
+    final doc = snap.docs.first;
+
+    return ReflectionThread.fromMap(doc.id, doc.data());
+
+  }
+
+
+
   /// Creates a thread and its first entry. [body] is required; [title] is optional.
 
   Future<ReflectionThread> createReflection({
@@ -213,6 +239,10 @@ class ReflectionService {
     String? linkedJourneyId,
 
     String? linkedSourceTitle,
+
+    String? linkedServiceProjectId,
+
+    String? linkedServiceEntryId,
 
     String? source,
 
@@ -282,6 +312,14 @@ class ReflectionService {
 
         'linkedSourceTitle': linkedSourceTitle.trim(),
 
+      if (linkedServiceProjectId != null &&
+          linkedServiceProjectId.trim().isNotEmpty)
+        'linkedServiceProjectId': linkedServiceProjectId.trim(),
+
+      if (linkedServiceEntryId != null &&
+          linkedServiceEntryId.trim().isNotEmpty)
+        'linkedServiceEntryId': linkedServiceEntryId.trim(),
+
       if (source != null && source.trim().isNotEmpty) 'source': source.trim(),
 
       'createdAt': FieldValue.serverTimestamp(),
@@ -331,6 +369,10 @@ class ReflectionService {
       linkedJourneyId: linkedJourneyId?.trim(),
 
       linkedSourceTitle: linkedSourceTitle?.trim(),
+
+      linkedServiceProjectId: linkedServiceProjectId?.trim(),
+
+      linkedServiceEntryId: linkedServiceEntryId?.trim(),
 
       source: source?.trim(),
 
@@ -391,6 +433,76 @@ class ReflectionService {
       linkedGiftId: giftId,
 
       linkedSourceTitle: giftTitle,
+
+    );
+
+  }
+
+
+
+  /// One private thread per hour entry: create or append. Never writes the body
+
+  /// onto [serviceHourEntries].
+
+  Future<ReflectionThread> upsertServiceReflection({
+
+    required String projectId,
+
+    required String entryId,
+
+    required String projectTitle,
+
+    required String body,
+
+    String? title,
+
+  }) async {
+
+    final trimmedBody = body.trim();
+
+    if (trimmedBody.isEmpty) {
+
+      throw Exception('Reflection text cannot be empty.');
+
+    }
+
+
+
+    final existing = await findThreadForServiceEntry(entryId);
+
+    if (existing != null) {
+
+      await appendEntry(threadId: existing.id, body: trimmedBody);
+
+      return existing.copyWith(
+
+        lastEntryPreview: _previewFor(trimmedBody),
+
+        updatedAt: DateTime.now(),
+
+      );
+
+    }
+
+
+
+    return createReflection(
+
+      title: title?.trim().isNotEmpty == true
+
+          ? title!.trim()
+
+          : 'Service: $projectTitle',
+
+      body: trimmedBody,
+
+      source: ReflectionSource.service,
+
+      linkedServiceProjectId: projectId,
+
+      linkedServiceEntryId: entryId,
+
+      linkedSourceTitle: projectTitle,
 
     );
 

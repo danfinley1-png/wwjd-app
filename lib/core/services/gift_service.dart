@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../models/gift_activity.dart';
 import '../../models/gift_status.dart';
+import '../firestore_auth_retry.dart';
 import '../gift_tracking.dart';
 import '../catholic_prayers/prayer_gift_link.dart';
 import 'history_service.dart';
@@ -18,14 +19,24 @@ class GiftService {
     return _firestore.collection('users').doc(uid).collection('gifts');
   }
 
-  /// Real-time stream of user's gifts
+  /// Real-time stream of the signed-in user's gifts.
   Stream<List<GiftActivity>> getUserGiftsStream() {
-    final col = _userGifts;
-    if (col == null) return Stream.value([]);
+    final user = _auth.currentUser;
+    if (user == null) return Stream.value(const []);
+    return watchGiftsForUid(user.uid);
+  }
 
-    return col.orderBy('createdAt', descending: true).snapshots().map((snap) {
-      return snap.docs.map((doc) => _fromDoc(doc)).toList();
-    });
+  Stream<List<GiftActivity>> watchGiftsForUid(String uid) {
+    final query = _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('gifts')
+        .orderBy('createdAt', descending: true);
+
+    return firestoreSnapshotsRetrying(
+      auth: _auth,
+      snapshots: () => query.snapshots(),
+    ).map((snap) => snap.docs.map(_fromDoc).toList());
   }
 
   /// One-time load
@@ -33,7 +44,10 @@ class GiftService {
     final col = _userGifts;
     if (col == null) return [];
 
-    final snap = await col.orderBy('createdAt', descending: true).get();
+    final snap = await firestoreGetRetrying(
+      auth: _auth,
+      get: () => col.orderBy('createdAt', descending: true).get(),
+    );
     return snap.docs.map((doc) => _fromDoc(doc)).toList();
   }
 

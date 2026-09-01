@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../firestore_auth_retry.dart';
 import '../group_practice_tracking.dart';
 import '../../models/group_practice_instance.dart';
 
@@ -22,15 +23,27 @@ class GroupPracticeService {
   }
 
   Stream<List<GroupPracticeInstance>> watchGroupPractices() {
-    final col = _practices;
-    if (col == null) return Stream.value(const []);
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return Stream.value(const []);
+    return watchGroupPracticesForUid(uid);
+  }
 
-    return col.orderBy('syncedAt', descending: true).snapshots().map(
-          (snap) => snap.docs
-              .map((doc) => GroupPracticeInstance.fromMap(doc.id, doc.data()))
-              .where((p) => p.active)
-              .toList(),
-        );
+  Stream<List<GroupPracticeInstance>> watchGroupPracticesForUid(String uid) {
+    final query = _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('groupPractices')
+        .orderBy('syncedAt', descending: true);
+
+    return firestoreSnapshotsRetrying(
+      auth: _auth,
+      snapshots: () => query.snapshots(),
+    ).map(
+      (snap) => snap.docs
+          .map((doc) => GroupPracticeInstance.fromMap(doc.id, doc.data()))
+          .where((p) => p.active)
+          .toList(),
+    );
   }
 
   Future<List<GroupPracticeInstance>> getGroupPractices() async {
