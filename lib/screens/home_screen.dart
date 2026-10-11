@@ -10,6 +10,7 @@ import '../spiritual_nourishment/local_worship/screens/local_worship_screen.dart
 import 'package:uuid/uuid.dart';
 import '../models/gift_activity.dart';
 import '../models/chat_message.dart';
+import '../models/pastoral_theme.dart';
 import '../models/reflection_source.dart';
 import '../core/auth/auth_service.dart';
 import '../core/services/gift_service.dart';
@@ -19,10 +20,14 @@ import '../admin/providers/admin_providers.dart';
 import '../core/providers/tts_providers.dart';
 import '../core/providers/reflection_providers.dart';
 import '../core/insights/pastoral_insights_config.dart';
+import '../core/insights/question_theme_classifier.dart';
+import '../core/insights/question_theme_recorder.dart';
+import '../widgets/reply_helpful_vote.dart';
 import '../widgets/auth_modal.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/chat_api_service.dart';
+import '../core/chat_quota_service.dart';
 import '../core/analytics/usage_analytics_service.dart';
 import '../core/analytics/usage_section.dart';
 import '../core/content_guidance/content_guidance_logger.dart';
@@ -44,6 +49,8 @@ import '../walk_together_screen.dart';
 import 'my_history_screen.dart';
 import 'edit_profile_screen.dart';
 import 'my_reflections_screen.dart';
+import '../models/saint_video.dart';
+import 'package:go_router/go_router.dart';
 import 'ministry_insights_screen.dart';
 import '../widgets/linked_markdown_body.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -51,6 +58,11 @@ import '../widgets/share_button.dart';
 import '../widgets/reflection_composer.dart';
 import '../widgets/welcome_dialog.dart';
 import '../widgets/auth_layout.dart';
+import '../widgets/wwjd_purpose_bar.dart';
+import '../widgets/home_welcome_section.dart';
+import '../widgets/wwjd_home_decision_chips.dart';
+import '../widgets/wwjd_watch_saints_link.dart';
+import '../widgets/wwjd_brand_title.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -81,6 +93,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   AuthService get _authService => ref.read(authServiceProvider);
   GiftService get _giftService => ref.read(giftServiceProvider);
   FirebaseFirestore get _firestore => FirebaseFirestore.instance;
+  final ChatQuotaService _chatQuotaService = ChatQuotaService();
   String? _userId;
 
   // Other state
@@ -175,6 +188,13 @@ Future<void> _bootstrap() async {
   }
 }
 
+  bool get _hasUserTurn => _messages.any((m) => m.isUser);
+
+  Future<void> _submitDecisionPrompt(String prompt) async {
+    _controller.text = prompt;
+    await _handleSend();
+  }
+
   List<ChatMessage> get _sessionHistory => ref.read(sessionHistoryProvider);
 
   ChatMessage _staticPrompt(String text) => ChatMessage(
@@ -182,8 +202,6 @@ Future<void> _bootstrap() async {
         text: text,
         isStaticPrompt: true,
       );
-
-  ChatMessage _welcomeMessage() => _staticPrompt(AppConfig.seekingGodsWisdomWelcome);
 
   /// Reload pending organization and group invitations for the signed-in user.
   void _refreshPendingInvites() {
@@ -224,8 +242,6 @@ Future<void> _bootstrap() async {
       if (history.isNotEmpty) {
         _messages.clear();
         _messages.addAll(history);
-      } else if (_messages.isEmpty) {
-        _messages.add(_welcomeMessage());
       }
     });
     _scrollAfterMessagesUpdated(scrollToLatest: hadConversation);
@@ -234,10 +250,6 @@ Future<void> _bootstrap() async {
   void _loadSeekingGodsWisdomScreen() {
     final hadConversation = _sessionHistory.isNotEmpty;
     setState(() {
-      if (_messages.isEmpty) {
-        _messages.add(_welcomeMessage());
-      }
-
       final history = _sessionHistory;
       if (history.isNotEmpty) {
         _messages.clear();
@@ -275,9 +287,6 @@ Future<void> _bootstrap() async {
     setState(() {
       _messages.clear();
       _messages.addAll(_sessionHistory);
-      if (_messages.isEmpty) {
-        _messages.add(_welcomeMessage());
-      }
     });
     _scrollAfterMessagesUpdated(scrollToLatest: hadConversation);
   }
@@ -319,6 +328,11 @@ Future<void> _bootstrap() async {
         builder: (context) => const PrayersScreen(),
       ),
     );
+  }
+
+  void _showSaints() {
+    _trackUsageSection(UsageSection.saints);
+    context.go(SaintEntry.listPath);
   }
 
   void _showLocalWorship({String? tab}) {
@@ -582,6 +596,19 @@ Future<void> _bootstrap() async {
     return 'No question found';
   }
 
+  /// Theme tag for a Helpful? vote — classified locally; never stored as text.
+  String? _themeTagForReplyAt(int index) {
+    for (int i = index - 1; i >= 0; i--) {
+      if (!_messages[i].isUser) continue;
+      final question = _messages[i].text.trim();
+      if (question.isEmpty) return null;
+      final theme = QuestionThemeClassifier.classify(question);
+      if (theme == null) return null;
+      return theme.firestoreValue;
+    }
+    return null;
+  }
+
   void _showWalkTogether() {
     _trackUsageSection(UsageSection.walkTogether);
     Navigator.push(
@@ -738,7 +765,6 @@ Future<void> _bootstrap() async {
     if (!mounted) return;
     setState(() {
       _messages.clear();
-      _messages.add(_welcomeMessage());
     });
     _scrollToTop();
   }
@@ -783,7 +809,10 @@ Future<void> _bootstrap() async {
       _messages.add(_staticPrompt(
         "**Terms & Privacy**\n\n"
             "This app is a formation aid aligned with the Magisterium of the Catholic Church.\n\n"
-            "It is not a substitute for the Sacraments or spiritual direction. For serious matters, consult your priest.",
+            "It is not a substitute for the Sacraments or spiritual direction. For serious matters, consult your priest.\n\n"
+            "**Ask WWJD limits:** Guests may ask up to ${AppConfig.guestQuestionLimit} questions, then sign in or register to continue. "
+            'Registered accounts may ask up to ${AppConfig.registeredDailyQuestionLimit} AI-guided questions per day (resets at midnight Eastern Time). '
+            'Delve Deeper counts toward the same limits.',
        ));
     });
     _scrollToTop();
@@ -918,6 +947,89 @@ Future<void> _bootstrap() async {
     }
   }
 
+  Future<bool> _ensureChatQuotaForSend() async {
+    if (_isMockMode || AppConfig.useClientSideXaiKey) return true;
+
+    await _ensureAuthForSession();
+    final user = _authService.currentUser;
+    if (user == null) {
+      if (!mounted) return false;
+      showAuthModal(context, ref);
+      return false;
+    }
+
+    try {
+      final status = await _chatQuotaService.statusForUser(user);
+      if (status.canAsk) return true;
+      if (!mounted) return false;
+      await _presentQuotaBlocked(status);
+      return false;
+    } catch (e) {
+      debugPrint('Chat quota precheck: $e');
+      return true;
+    }
+  }
+
+  Future<void> _presentQuotaBlocked(ChatQuotaStatus status) async {
+    if (status.guestLimitReached) {
+      await _promptSignInAfterGuestLimit();
+      return;
+    }
+    if (status.dailyLimitReached) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Daily limit reached (${status.limit} questions). '
+            'You can ask again after midnight Eastern Time.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _promptSignInAfterGuestLimit() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => ResponsiveAuthDialog(
+        title: const Text('Continue Your Journey'),
+        content: Text(
+          'Guests may ask up to ${AppConfig.guestQuestionLimit} WWJD questions.\n\n'
+          'Sign in or register for up to '
+          '${AppConfig.registeredDailyQuestionLimit} questions per day and to save your history.',
+        ),
+        actions: AuthDialogActions(
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                showAuthModal(
+                  context,
+                  ref,
+                  onAuthSuccess: _loadSessionFromFirebase,
+                );
+              },
+              child: const Text('Sign In / Register'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Not now'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _presentChatApiFailure(ChatApiException e) {
+    if (e.code == 'GUEST_LIMIT') {
+      unawaited(_promptSignInAfterGuestLimit());
+    } else if (e.code == 'DAILY_LIMIT') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    }
+  }
+
   Future<void> _handleSend() async {
     var text = _controller.text.trim();
     if (text.isEmpty || _isSending) return;
@@ -936,6 +1048,8 @@ Future<void> _bootstrap() async {
 
     if (text.isEmpty || _isSending) return;
 
+    if (!await _ensureChatQuotaForSend()) return;
+
     setState(() {
       _messages.add(ChatMessage(isUser: true, text: text));
       _messages.add(ChatMessage(isUser: false, text: '', isLoading: true));
@@ -947,6 +1061,7 @@ Future<void> _bootstrap() async {
 
     // Save in parallel — do not block the AI call (was causing infinite spinner).
     unawaited(_persistSessionInBackground());
+    unawaited(QuestionThemeRecorder.instance.recordSeekingWisdom(text));
 
     try {
       if (_isMockMode) {
@@ -1023,6 +1138,7 @@ Future<void> _bootstrap() async {
       unawaited(_persistSessionInBackground());
     } on ChatApiException catch (e) {
       if (!mounted) return;
+      _presentChatApiFailure(e);
       setState(() {
         _removeLoadingMessageIfPresent();
         _messages.add(ChatMessage(
@@ -1049,6 +1165,16 @@ Future<void> _bootstrap() async {
     }
   }
   Future<void> _callLiveGrokDelveDeeper(String delveUserMessage) async {
+    if (!await _ensureChatQuotaForSend()) {
+      if (mounted) {
+        setState(() {
+          _removeLoadingMessageIfPresent();
+          _isSending = false;
+        });
+      }
+      return;
+    }
+
     try {
       final rawResponse = await ChatApiService.fetchDelveDeeperResponse(
         delveUserMessage: delveUserMessage,
@@ -1070,6 +1196,7 @@ Future<void> _bootstrap() async {
       unawaited(_persistSessionInBackground());
     } on ChatApiException catch (e) {
       if (!mounted) return;
+      _presentChatApiFailure(e);
       setState(() {
         _removeLoadingMessageIfPresent();
         _messages.add(ChatMessage(
@@ -1277,6 +1404,7 @@ Future<void> _bootstrap() async {
         _sidebarTile(Icons.refresh, 'Go to Confession', () => _showSpiritualNourishment('confession')),
         _sidebarTile(Icons.favorite_border, 'Eucharistic Adoration', () => _showSpiritualNourishment('adoration')),
         _sidebarTile(Icons.assignment_outlined, 'Examination of Conscience', () => _showSpiritualNourishment('examination')),
+        _sidebarTile(Icons.auto_awesome_outlined, 'Saints', _showSaints),
         _sidebarTile(Icons.menu_book_outlined, 'Prayers', _showPrayers),
         _sidebarTile(
           Icons.psychology_outlined,
@@ -1357,7 +1485,12 @@ Future<void> _bootstrap() async {
                 child: _buildSidebar(isInDrawer: true),
               ),
             ),
-      body: LayoutBuilder(
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const WwjdPurposeBar(),
+          Expanded(
+            child: LayoutBuilder(
         builder: (context, constraints) {
           return Row(
             children: [
@@ -1393,7 +1526,7 @@ Future<void> _bootstrap() async {
 
                           // Reversed ListView - Newest at top
                           Expanded(
-                          child: _messages.isEmpty
+                          child: !_hasUserTurn
                           ? _buildEmptyState()
                           : ListView.builder(
                               controller: _scrollController,
@@ -1414,6 +1547,9 @@ Future<void> _bootstrap() async {
             ],
           );
         },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1429,7 +1565,7 @@ Future<void> _bootstrap() async {
     final compact = isCompactWidth(context);
 
     return AppBar(
-      toolbarHeight: compact ? 56 : 90,
+      toolbarHeight: 72,
       automaticallyImplyLeading: false,
       leading: !isWide
           ? IconButton(
@@ -1439,50 +1575,15 @@ Future<void> _bootstrap() async {
               style: mobileIconButtonStyle(context),
             )
           : null,
-      title: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.church, size: compact ? 28 : 36),
-          SizedBox(width: compact ? 8 : 12),
-          Flexible(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  compact ? 'WWJD' : AppConfig.appName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: compact ? 18 : 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (!compact)
-                  Text(
-                    AppConfig.tagline,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11, color: Colors.white70),
-                  ),
-              ],
-            ),
-          ),
-          if (!compact) ...[
-            const SizedBox(width: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.asset(
-                'assets/images/wwjd_header.jpg',
-                height: 58,
-                width: 58,
-                fit: BoxFit.cover,
-              ),
-            ),
-          ],
-        ],
+      title: WwjdBrandTitle(
+        logoSize: compact ? 44 : 54,
+        titleStyle: TextStyle(
+          fontSize: compact ? 18 : 22,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.2,
+        ),
       ),
-      centerTitle: true,
+      centerTitle: false,
       actions: [
         IconButton(
           icon: const Icon(Icons.logout),
@@ -1495,27 +1596,14 @@ Future<void> _bootstrap() async {
   }
 
   Widget _buildEmptyState() {
-    return Center(
+    return SingleChildScrollView(
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.church, size: kEmptyStateIconSize, color: AppColors.primaryMaroon),
+          const HomeWelcomeSection(),
+          WwjdHomeDecisionChips(onSelectPrompt: _submitDecisionPrompt),
+          const Center(child: WwjdWatchSaintsLink()),
           const SizedBox(height: 24),
-          const Text('Peace be with you.', style: TextStyle(fontSize: 22)),
-          const Text(
-            'What is weighing on your heart today?',
-            style: TextStyle(fontSize: 18),
-          ),
-          const SizedBox(height: 20),
-          OutlinedButton.icon(
-            onPressed: _focusChatInput,
-            icon: const Icon(Icons.edit_outlined),
-            label: const Text('Tap to ask a question'),
-            style: OutlinedButton.styleFrom(
-              minimumSize: Size(200, touchTargetMin(context)),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            ),
-          ),
         ],
       ),
     );
@@ -1578,6 +1666,11 @@ Future<void> _bootstrap() async {
             if (msg.showsConversationActions) ...[
               const SizedBox(height: 12),
               _buildConversationActions(msg),
+              const SizedBox(height: 6),
+              ReplyHelpfulVote(
+                key: ValueKey('helpful-${msg.id}'),
+                theme: _themeTagForReplyAt(index),
+              ),
             ],
           ],
         ),
@@ -1648,30 +1741,33 @@ Future<void> _bootstrap() async {
           label: const Text('Delve Deeper'),
           style: maroon,
         ),
-        IconButton(
-          tooltip: 'Copy',
-          icon: const Icon(Icons.copy, size: 19),
+        TextButton.icon(
           onPressed: () => _copyToClipboard(msg.text),
+          icon: const Icon(Icons.copy_outlined, size: 18),
+          label: const Text('Copy'),
+          style: maroon,
         ),
-        IconButton(
-          tooltip: 'Listen',
-          icon: const Icon(Icons.volume_up, size: 19),
+        TextButton.icon(
           onPressed: () => _speak(msg.text),
+          icon: const Icon(Icons.volume_up_outlined, size: 18),
+          label: const Text('Listen'),
+          style: maroon,
         ),
         ShareButton(
           question: _getLatestUserQuestion(),
           response: msg.text,
+          showLabel: true,
         ),
         TextButton.icon(
-          icon: const Icon(Icons.card_giftcard, size: 18),
-          label: const Text('Add to My Gifts Plan'),
           onPressed: () => _addToGiftsPlan(msg),
+          icon: const Icon(Icons.card_giftcard_outlined, size: 18),
+          label: const Text('Gifts'),
           style: maroon,
         ),
         TextButton.icon(
-          icon: const Icon(Icons.edit_note_outlined, size: 18),
-          label: const Text('Add to My Reflections'),
           onPressed: () => _addToReflections(msg),
+          icon: const Icon(Icons.edit_note_outlined, size: 18),
+          label: const Text('Reflect'),
           style: maroon,
         ),
       ],
@@ -1730,9 +1826,7 @@ Future<void> _bootstrap() async {
                   textCapitalization: TextCapitalization.sentences,
                   decoration: InputDecoration(
                     isDense: true,
-                    hintText: isCompactWidth(context)
-                        ? 'Your question…'
-                        : 'Bring your question or struggle… we walk together',
+                    hintText: AppConfig.chatInputPlaceholder,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 12,

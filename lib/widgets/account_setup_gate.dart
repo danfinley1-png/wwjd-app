@@ -46,7 +46,9 @@ class _AccountSetupGateState extends ConsumerState<AccountSetupGate> {
 
         return widget.child;
       },
-      loading: () => widget.child,
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      ),
       error: (_, __) => widget.child,
     );
   }

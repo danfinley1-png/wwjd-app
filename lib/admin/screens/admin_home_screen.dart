@@ -10,7 +10,12 @@ import 'create_organization_screen.dart';
 import 'edit_organization_screen.dart';
 import 'organization_detail_screen.dart';
 import 'pending_invites_screen.dart';
+import 'org_gifts_screen.dart';
 import 'platform_groups_screen.dart';
+import 'platform_users_screen.dart';
+import 'admin_saints_screen.dart';
+import 'product_feedback_screen.dart';
+import 'question_theme_report_screen.dart';
 import 'usage_report_screen.dart';
 
 /// Entry point for parish/school/ministry administrators.
@@ -52,6 +57,26 @@ class AdminHomeScreen extends ConsumerWidget {
           const SizedBox(height: 8),
           Card(
             child: ListTile(
+              leading: Icon(Icons.people_outline, color: Colors.indigo.shade800),
+              title: const Text('Users'),
+              subtitle: const Text(
+                'Every registered WWJD-DI account — invite to WWJD-DI only, '
+                'or to an organization or group. Private spiritual content stays private.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const PlatformUsersScreen(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
               leading: Icon(Icons.groups_outlined, color: Colors.indigo.shade800),
               title: const Text('All groups'),
               subtitle: const Text(
@@ -71,6 +96,27 @@ class AdminHomeScreen extends ConsumerWidget {
           const SizedBox(height: 8),
           Card(
             child: ListTile(
+              leading: Icon(Icons.card_giftcard_outlined,
+                  color: Colors.indigo.shade800),
+              title: const Text('Organization and group Gifts'),
+              subtitle: const Text(
+                'Delete a Gift for one group, or for every group in an '
+                'organization that shares it. Personal Gifts stay private.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const PlatformGiftsScreen(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
               leading: Icon(Icons.analytics_outlined, color: Colors.indigo.shade800),
               title: const Text('Usage Report'),
               subtitle: const Text(
@@ -82,6 +128,64 @@ class AdminHomeScreen extends ConsumerWidget {
                   context,
                   MaterialPageRoute(
                     builder: (_) => const UsageReportScreen(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: Icon(Icons.insights_outlined, color: Colors.indigo.shade800),
+              title: const Text('Question themes'),
+              subtitle: const Text(
+                'Anonymized Seeking God\'s Wisdom and Walk Together themes — '
+                'no question text, names, or accounts.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const QuestionThemeReportScreen(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: Icon(Icons.auto_awesome_outlined, color: Colors.indigo.shade800),
+              title: const Text('Saints videos'),
+              subtitle: const Text(
+                'Create 8-segment saint series — metadata in Firestore, clips in Storage.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const AdminSaintsScreen(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: Icon(Icons.feedback_outlined, color: Colors.indigo.shade800),
+              title: const Text('Feedback'),
+              subtitle: const Text(
+                'Product issues from My Profile — not spiritual journaling.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ProductFeedbackScreen(),
                   ),
                 );
               },

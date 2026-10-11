@@ -1,5 +1,10 @@
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const { resendApiKey, emailFrom } = require("./email_config");
+const {
+  resendApiKey,
+  EMAIL_FROM,
+  EMAIL_LOGO_URL,
+  EMAIL_LOGO_CONTENT_ID,
+} = require("./email_config");
 
 /**
  * Sends email via Resend REST API. Returns { ok, id?, error? }.
@@ -7,15 +12,24 @@ const { resendApiKey, emailFrom } = require("./email_config");
  */
 async function sendEmail({ to, subject, html, text, tags = [] }) {
   const apiKey = resendApiKey.value();
-  const from = emailFrom.value();
+  const from = EMAIL_FROM;
+
+  if (/resend\.dev/i.test(from)) {
+    console.error("sendEmail blocked: refusing Resend test-domain From", from);
+    return {
+      ok: false,
+      from,
+      error: "Refusing onboarding@resend.dev From address",
+    };
+  }
 
   if (!apiKey) {
     console.warn("sendEmail skipped: RESEND_API_KEY is not configured");
-    return { ok: false, error: "RESEND_API_KEY is not configured" };
+    return { ok: false, from, error: "RESEND_API_KEY is not configured" };
   }
 
   if (!to || !subject) {
-    return { ok: false, error: "Missing recipient or subject" };
+    return { ok: false, from, error: "Missing recipient or subject" };
   }
 
   try {
@@ -32,6 +46,13 @@ async function sendEmail({ to, subject, html, text, tags = [] }) {
         html,
         text,
         tags,
+        attachments: [
+          {
+            filename: "wwjd-di-logo.png",
+            path: EMAIL_LOGO_URL,
+            content_id: EMAIL_LOGO_CONTENT_ID,
+          },
+        ],
       }),
     });
 
@@ -40,15 +61,26 @@ async function sendEmail({ to, subject, html, text, tags = [] }) {
     if (!response.ok) {
       const message =
         body?.message || body?.error || `Resend HTTP ${response.status}`;
-      console.error("sendEmail failed:", to, message, body);
-      return { ok: false, error: message };
+      console.error("sendEmail failed:", {
+        to,
+        from,
+        resendStatus: "failed",
+        error: message,
+        body,
+      });
+      return { ok: false, from, error: message };
     }
 
-    console.log("sendEmail success:", to, body?.id || "(no id)");
-    return { ok: true, id: body?.id };
+    console.log("sendEmail success:", {
+      to,
+      from,
+      resendStatus: "sent",
+      resendId: body?.id || null,
+    });
+    return { ok: true, from, id: body?.id };
   } catch (err) {
-    console.error("sendEmail error:", to, err);
-    return { ok: false, error: err.message || "Email send failed" };
+    console.error("sendEmail error:", { to, from, error: err });
+    return { ok: false, from, error: err.message || "Email send failed" };
   }
 }
 
@@ -58,18 +90,23 @@ async function sendEmail({ to, subject, html, text, tags = [] }) {
 async function logEmailDelivery({
   type,
   to,
+  from,
   ok,
   error,
   organizationId,
   inviteId,
   orgId,
+  resendId,
 }) {
   try {
     const db = getFirestore();
     const payload = {
       type,
       to,
+      from: from || null,
       ok,
+      resendStatus: ok ? "sent" : "failed",
+      resendId: resendId || null,
       error: error || null,
       organizationId: organizationId || orgId || null,
       inviteId: inviteId || null,

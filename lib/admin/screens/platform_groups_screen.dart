@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/ministry_group.dart';
 import '../models/organization.dart';
 import '../providers/admin_providers.dart';
+import '../widgets/admin_rules_debug.dart';
 import '../../widgets/group_brand_mark.dart';
 import 'group_members_screen.dart';
 
@@ -87,11 +88,8 @@ class PlatformGroupsScreen extends ConsumerWidget {
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text('Could not load groups:\n$e'),
-          ),
+        error: (e, _) => AdminRulesDebugText(
+          message: 'Could not load groups:\n$e',
         ),
       ),
     );

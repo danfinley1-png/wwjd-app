@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../core/platform_admin_claim.dart';
 import '../../models/gift_activity.dart';
 import '../../models/gift_status.dart';
 import '../config/admin_config.dart';
@@ -9,6 +10,17 @@ import '../models/group_gift.dart';
 import '../models/ministry_group.dart';
 import '../models/organization_membership.dart';
 import '../utils/group_gift_share_access.dart';
+
+/// One group Gift definition inside an organization.
+class OrganizationGiftEntry {
+  const OrganizationGiftEntry({
+    required this.group,
+    required this.gift,
+  });
+
+  final MinistryGroup group;
+  final GroupGift gift;
+}
 
 /// Outcome of copying a group Gift into other groups in the same organization.
 class GroupGiftShareResult {
@@ -58,11 +70,13 @@ class GroupGiftService {
     return _gifts(orgId, groupId)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map(
-          (snap) => snap.docs
+        .map((snap) {
+          final gifts = snap.docs
               .map((doc) => GroupGift.fromMap(doc.id, doc.data()))
-              .toList(),
-        );
+              .toList();
+          gifts.sort(GroupGift.compareDisplay);
+          return gifts;
+        });
   }
 
   Future<String> createGift({
@@ -93,6 +107,7 @@ class GroupGiftService {
 
     final ref = _gifts(orgId, group.id).doc();
     final orgLogo = await _logoUrlForOrg(orgId);
+    final sortOrder = await _nextSortOrder(orgId, group.id);
     final gift = GroupGift(
       id: ref.id,
       organizationId: orgId,
@@ -119,6 +134,7 @@ class GroupGiftService {
           : sharedFromGroupId?.trim(),
       createdByUid: uid,
       createdAt: DateTime.now(),
+      sortOrder: sortOrder,
     );
 
     try {
@@ -139,6 +155,72 @@ class GroupGiftService {
       }
     }
     return ref.id;
+  }
+
+  /// Persists the administrator's order. [orderedIds] is top to bottom.
+  Future<void> reorderGifts({
+    required String orgId,
+    required String groupId,
+    required List<String> orderedIds,
+  }) async {
+    await _assertCanManageGroupGifts(orgId, groupId);
+    if (orderedIds.isEmpty) return;
+
+    var batch = _firestore.batch();
+    var ops = 0;
+
+    Future<void> flush({bool force = false}) async {
+      if (ops == 0) return;
+      if (!force && ops < 400) return;
+      await batch.commit();
+      batch = _firestore.batch();
+      ops = 0;
+    }
+
+    for (var i = 0; i < orderedIds.length; i++) {
+      batch.update(_gifts(orgId, groupId).doc(orderedIds[i]), {
+        'sortOrder': i,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      ops++;
+      await flush();
+    }
+
+    await flush(force: true);
+
+    // Do not read users/{uid}/gifts. Only the member may read that copy.
+    // Update it directly; a missing copy is skipped.
+    final members = await _acceptedMembers(orgId, groupId);
+    for (final member in members) {
+      final col = _userGifts(member.uid);
+      if (col == null) continue;
+      for (var i = 0; i < orderedIds.length; i++) {
+        try {
+          await col.doc(orderedIds[i]).update({
+            'sortOrder': i,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } on FirebaseException catch (e) {
+          if (e.code == 'not-found') continue;
+          rethrow;
+        }
+      }
+    }
+  }
+
+  Future<int?> _nextSortOrder(String orgId, String groupId) async {
+    final snap = await _gifts(orgId, groupId).get();
+    var maxOrder = -1;
+    var any = false;
+    for (final doc in snap.docs) {
+      final raw = doc.data()['sortOrder'];
+      if (raw is num) {
+        any = true;
+        if (raw.toInt() > maxOrder) maxOrder = raw.toInt();
+      }
+    }
+    if (!any) return null;
+    return maxOrder + 1;
   }
 
   Future<void> updateGift(GroupGift gift) async {
@@ -276,6 +358,93 @@ class GroupGiftService {
     if (ops > 0) await batch.commit();
   }
 
+  /// Every group Gift in [orgId]. Group definitions only — not personal Gifts.
+  Future<List<OrganizationGiftEntry>> loadGiftsForOrganization(
+    String orgId,
+  ) async {
+    if (!await _isOverallAdmin()) {
+      throw Exception(
+        'Only an overall administrator can list Gifts across an organization.',
+      );
+    }
+    final groupsSnap = await _firestore
+        .collection('organizations')
+        .doc(orgId)
+        .collection('groups')
+        .get();
+    final entries = <OrganizationGiftEntry>[];
+    for (final groupDoc in groupsSnap.docs) {
+      final group = MinistryGroup.fromMap(groupDoc.id, groupDoc.data());
+      final giftsSnap = await _gifts(orgId, group.id).get();
+      final gifts = giftsSnap.docs
+          .map((doc) => GroupGift.fromMap(doc.id, doc.data()))
+          .toList()
+        ..sort(GroupGift.compareDisplay);
+      for (final gift in gifts) {
+        entries.add(OrganizationGiftEntry(group: group, gift: gift));
+      }
+    }
+    entries.sort((a, b) {
+      final byGroup = a.group.name.toLowerCase().compareTo(
+            b.group.name.toLowerCase(),
+          );
+      if (byGroup != 0) return byGroup;
+      return GroupGift.compareDisplay(a.gift, b.gift);
+    });
+    return entries;
+  }
+
+  /// Deletes the group Gift and each accepted member's copy.
+  /// Member copies are deleted by id. They are not read first.
+  Future<void> deleteGift({
+    required String orgId,
+    required String groupId,
+    required String giftId,
+  }) async {
+    await _assertCanManageGroupGifts(orgId, groupId);
+    await _gifts(orgId, groupId).doc(giftId).delete();
+
+    final members = await _acceptedMembers(orgId, groupId);
+    for (final member in members) {
+      final col = _userGifts(member.uid);
+      if (col == null) continue;
+      try {
+        await col.doc(giftId).delete();
+      } on FirebaseException catch (e) {
+        if (e.code == 'not-found') continue;
+        rethrow;
+      }
+    }
+  }
+
+  /// Deletes this Gift from every group in the organization that shares it.
+  ///
+  /// Overall administrator only. Personal Gifts are left in place.
+  Future<int> deleteGiftAcrossOrganization({
+    required String orgId,
+    required GroupGift gift,
+  }) async {
+    if (!await _isOverallAdmin()) {
+      throw Exception(
+        'Only an overall administrator can delete a Gift for the whole organization.',
+      );
+    }
+    final entries = await loadGiftsForOrganization(orgId);
+    final family = GroupGift.sameGiftAcrossGroups(
+      entries.map((entry) => entry.gift).toList(),
+      gift,
+    );
+    final targets = family.isEmpty ? [gift] : family;
+    for (final target in targets) {
+      await deleteGift(
+        orgId: orgId,
+        groupId: target.groupId,
+        giftId: target.id,
+      );
+    }
+    return targets.length;
+  }
+
   /// Removes synced group Gifts when a member leaves a group.
   Future<void> removeGiftsForMember({
     required String orgId,
@@ -386,15 +555,33 @@ class GroupGiftService {
           ? GiftStatus.active.firestoreValue
           : GiftStatus.paused.firestoreValue,
       'createdAt': Timestamp.fromDate(gift.createdAt),
+      if (gift.sortOrder != null) 'sortOrder': gift.sortOrder,
       'updatedAt': FieldValue.serverTimestamp(),
     };
+  }
+
+  Future<bool> _isOverallAdmin() async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    if (AdminConfig.isFoundationAdmin(user.email)) return true;
+    try {
+      final token = await user.getIdTokenResult();
+      if (PlatformAdminClaim.hasAdminClaim(token.claims)) return true;
+    } catch (_) {
+      // Claim lookup can fail offline. The platformAdmins document is next.
+    }
+    final snap =
+        await _firestore.collection('platformAdmins').doc(user.uid).get();
+    if (!snap.exists) return false;
+    final role = snap.data()?['role']?.toString() ?? '';
+    return role.isEmpty || role == 'superAdmin';
   }
 
   Future<void> _assertCanManageGroupGifts(String orgId, String groupId) async {
     final uid = _uid;
     if (uid == null) throw Exception('Sign in required.');
 
-    var isOrgAdmin = AdminConfig.isFoundationAdmin(_auth.currentUser?.email);
+    var isOrgAdmin = await _isOverallAdmin();
     if (!isOrgAdmin) {
       final platformSnap =
           await _firestore.collection('platformAdmins').doc(uid).get();

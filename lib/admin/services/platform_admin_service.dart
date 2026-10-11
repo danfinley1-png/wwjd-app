@@ -1,50 +1,30 @@
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:http/http.dart' as http;
 
 import '../../core/config.dart';
+import '../../core/platform_admin_claim.dart';
 import '../config/admin_config.dart';
-import '../models/platform_admin.dart';
 
 /// Platform-level (Super / Overall) administrator operations.
 class PlatformAdminService {
-  PlatformAdminService({
-    FirebaseFirestore? firestore,
-    FirebaseAuth? auth,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance;
+  PlatformAdminService({FirebaseAuth? auth})
+      : _auth = auth ?? FirebaseAuth.instance;
 
-  final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
-
-  CollectionReference<Map<String, dynamic>> get _platformAdmins =>
-      _firestore.collection('platformAdmins');
 
   bool get isFoundationAdminEmail {
     return AdminConfig.isFoundationAdmin(_auth.currentUser?.email);
   }
 
   Stream<bool> watchIsSuperAdmin() {
-    final user = _auth.currentUser;
-    if (user == null) return Stream.value(false);
-    if (AdminConfig.isFoundationAdmin(user.email)) {
-      return Stream.value(true);
-    }
-    return _platformAdmins
-        .doc(user.uid)
-        .snapshots()
-        .map((snap) => snap.exists);
+    return PlatformAdminClaim.watchPlatformAdmin(_auth);
   }
 
   Future<bool> isSuperAdmin() async {
-    final user = _auth.currentUser;
-    if (user == null) return false;
-    if (AdminConfig.isFoundationAdmin(user.email)) return true;
-    final snap = await _platformAdmins.doc(user.uid).get();
-    return snap.exists;
+    return PlatformAdminClaim.isPlatformAdmin(_auth);
   }
 
   /// Registers foundation admin in Firestore (via Cloud Function when available).
@@ -63,21 +43,18 @@ class PlatformAdminService {
             'Authorization': 'Bearer $token',
           },
         );
-        if (response.statusCode >= 200 && response.statusCode < 300) return;
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          await user.getIdToken(true);
+          return;
+        }
       } catch (_) {
-        // Try next endpoint, then fall back to direct write.
+        // Try next endpoint.
       }
     }
 
-    await _registerLocally(user.uid, user.email!);
-  }
-
-  Future<void> _registerLocally(String uid, String email) async {
-    final snap = await _platformAdmins.doc(uid).get();
-    if (snap.exists) return;
-    await _platformAdmins.doc(uid).set(
-      PlatformAdmin(uid: uid, email: email.trim().toLowerCase(), registeredAt: DateTime.now())
-          .toMap(),
+    debugPrint(
+      'PlatformAdminService.ensureRegistered: Cloud Function unavailable. '
+      'Deploy functions and call ensurePlatformAdmin to set admin claim.',
     );
   }
 
@@ -105,12 +82,24 @@ class UserProvisioningService {
 
   final FirebaseAuth _auth;
 
-  Future<ProvisionUsersResult> provisionUsers({
-    required String orgId,
+  Future<BulkRosterResult> provisionUsers({
+    String? orgId,
+    String target = 'organization',
     required List<ProvisionUserEntry> users,
+    required String mode,
+    List<String> groupIds = const [],
+    bool attachOrgInvite = true,
+    String? emailSubject,
+    String? emailText,
   }) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('Sign in required.');
+
+    final isPlatform = target == 'platform' || target == 'wwjd-di';
+    final trimmedOrgId = orgId?.trim() ?? '';
+    if (!isPlatform && trimmedOrgId.isEmpty) {
+      throw Exception('Organization is required unless inviting to WWJD-DI only.');
+    }
 
     final token = await user.getIdToken();
     String? lastError;
@@ -124,14 +113,22 @@ class UserProvisioningService {
             'Authorization': 'Bearer $token',
           },
           body: jsonEncode({
-            'orgId': orgId,
+            'target': isPlatform ? 'platform' : 'organization',
+            if (!isPlatform) 'orgId': trimmedOrgId,
+            'mode': mode,
             'users': users.map((u) => u.toJson()).toList(),
+            'groupIds': isPlatform ? const <String>[] : groupIds,
+            'attachOrgInvite': isPlatform ? false : attachOrgInvite,
+            if (emailSubject != null && emailSubject.trim().isNotEmpty)
+              'emailSubject': emailSubject.trim(),
+            if (emailText != null && emailText.trim().isNotEmpty)
+              'emailText': emailText.trim(),
           }),
         );
 
         if (response.statusCode >= 200 && response.statusCode < 300) {
           final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-          return ProvisionUsersResult.fromJson(decoded);
+          return BulkRosterResult.fromJson(decoded);
         }
 
         lastError = _formatHttpFailure(
@@ -235,50 +232,80 @@ class ProvisionUserEntry {
       };
 }
 
-class ProvisionUsersResult {
-  const ProvisionUsersResult({
-    required this.created,
-    required this.skipped,
+class BulkRosterResult {
+  const BulkRosterResult({
+    required this.mode,
+    required this.rows,
   });
 
-  final List<ProvisionedAccount> created;
-  final List<String> skipped;
+  final String mode;
+  final List<BulkRosterRow> rows;
 
-  factory ProvisionUsersResult.fromJson(Map<String, dynamic> json) {
-    final createdRaw = json['created'] as List<dynamic>? ?? const [];
-    return ProvisionUsersResult(
-      created: createdRaw
-          .map((e) => ProvisionedAccount.fromJson(e as Map<String, dynamic>))
-          .toList(),
-      skipped: (json['skipped'] as List<dynamic>? ?? const [])
-          .map((e) => e.toString())
+  factory BulkRosterResult.fromJson(Map<String, dynamic> json) {
+    final rowsRaw = json['rows'] as List<dynamic>? ?? const [];
+    return BulkRosterResult(
+      mode: json['mode'] as String? ?? '',
+      rows: rowsRaw
+          .map((e) => BulkRosterRow.fromJson(e as Map<String, dynamic>))
           .toList(),
     );
   }
 }
 
-class ProvisionedAccount {
-  const ProvisionedAccount({
+class BulkRosterRow {
+  const BulkRosterRow({
     required this.email,
-    required this.temporaryPassword,
     this.displayName,
-    this.welcomeEmailSent = false,
-    this.welcomeEmailError,
+    this.created = false,
+    this.invited = false,
+    this.emailSent = false,
+    this.emailFailed = false,
+    this.emailError,
+    this.skipped = false,
+    this.skipReason,
+    this.temporaryPassword,
   });
 
   final String email;
-  final String temporaryPassword;
   final String? displayName;
-  final bool welcomeEmailSent;
-  final String? welcomeEmailError;
+  final bool created;
+  final bool invited;
+  final bool emailSent;
+  final bool emailFailed;
+  final String? emailError;
+  final bool skipped;
+  final String? skipReason;
+  final String? temporaryPassword;
 
-  factory ProvisionedAccount.fromJson(Map<String, dynamic> json) {
-    return ProvisionedAccount(
+  String get skipLabel {
+    switch (skipReason) {
+      case 'already_exists':
+        return 'Already has an account';
+      case 'already_invited':
+        return 'Pending invite already exists';
+      case 'already_member':
+        return 'Already a member';
+      case 'invalid':
+        return 'Invalid email';
+      case 'error':
+        return emailError ?? 'Could not complete';
+      default:
+        return skipped ? 'Skipped' : '';
+    }
+  }
+
+  factory BulkRosterRow.fromJson(Map<String, dynamic> json) {
+    return BulkRosterRow(
       email: json['email'] as String? ?? '',
-      temporaryPassword: json['temporaryPassword'] as String? ?? '',
       displayName: json['displayName'] as String?,
-      welcomeEmailSent: json['welcomeEmailSent'] as bool? ?? false,
-      welcomeEmailError: json['welcomeEmailError'] as String?,
+      created: json['created'] as bool? ?? false,
+      invited: json['invited'] as bool? ?? false,
+      emailSent: json['emailSent'] as bool? ?? false,
+      emailFailed: json['emailFailed'] as bool? ?? false,
+      emailError: json['emailError'] as String?,
+      skipped: json['skipped'] as bool? ?? false,
+      skipReason: json['skipReason'] as String?,
+      temporaryPassword: json['temporaryPassword'] as String?,
     );
   }
 }

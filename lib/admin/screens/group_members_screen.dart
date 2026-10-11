@@ -9,6 +9,7 @@ import '../models/organization_membership.dart';
 import '../models/organization.dart';
 import '../providers/admin_providers.dart';
 import '../utils/group_member_list.dart';
+import '../widgets/admin_rules_debug.dart';
 import '../../widgets/group_brand_mark.dart';
 import 'create_group_gift_screen.dart';
 import 'group_gifts_screen.dart';
@@ -243,17 +244,11 @@ class GroupMembersScreen extends ConsumerWidget {
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'Could not load group members:\n$e\n\n'
+        error: (e, _) => AdminRulesDebugText(
+          message: 'Could not load group members:\n$e\n\n'
               'If you are a Super Admin, deploy the latest Firestore rules and '
               'confirm your administrator account is registered, or sign in with the '
               'foundation admin email.',
-              textAlign: TextAlign.center,
-            ),
-          ),
         ),
             ),
           ),

@@ -10,8 +10,14 @@
 # Verify:
 #   gcloud storage buckets describe gs://wwjd-di-e36ce.firebasestorage.app --format="json(cors)"
 
+$gcloud = "gcloud"
+if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+  $fallback = "$env:LOCALAPPDATA\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd"
+  if (Test-Path $fallback) { $gcloud = $fallback }
+}
+
 Write-Host "Applying Storage CORS from storage.cors.json ..."
-gcloud storage buckets update gs://wwjd-di-e36ce.firebasestorage.app --cors-file=storage.cors.json
+& $gcloud storage buckets update gs://wwjd-di-e36ce.firebasestorage.app --cors-file=storage.cors.json
 if ($LASTEXITCODE -eq 0) {
   Write-Host "CORS applied. Hard-refresh your browser and retry profile photo upload."
 } else {

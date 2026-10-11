@@ -251,6 +251,85 @@ class OrganizationService {
     });
   }
 
+  /// Places a registered account in a group. Creates organization membership
+  /// when the person is not in the organization yet.
+  ///
+  /// Returns true when they were already in the group. Indexes and group
+  /// copies are still refreshed.
+  Future<bool> addRegisteredUserToGroup({
+    required String orgId,
+    required String memberUid,
+    required String groupId,
+    required String email,
+    String? displayName,
+  }) async {
+    final uid = _uid;
+    if (uid == null) throw Exception('Sign in required.');
+    await _requireCanManageGroups(orgId);
+    if (memberUid.trim().isEmpty) {
+      throw Exception('This person does not have a WWJD-DI account yet.');
+    }
+    if (groupId.trim().isEmpty) throw Exception('Choose a group.');
+
+    final memberRef =
+        _organizations.doc(orgId).collection('members').doc(memberUid);
+    final memberSnap = await memberRef.get();
+    final normalized = normalizeEmail(email);
+    final trimmedName = displayName?.trim();
+    var alreadyInGroup = false;
+    var roleValue = AdminRole.member.firestoreValue;
+    var joinedAt = DateTime.now();
+
+    if (!memberSnap.exists || memberSnap.data() == null) {
+      await memberRef.set(
+        OrganizationMembership(
+          uid: memberUid,
+          organizationId: orgId,
+          role: AdminRole.member,
+          joinedAt: joinedAt,
+          email: normalized.isEmpty ? null : normalized,
+          displayName: (trimmedName == null || trimmedName.isEmpty)
+              ? null
+              : trimmedName,
+          groupIds: [groupId],
+          invitedByUid: uid,
+        ).toMap(),
+      );
+    } else {
+      final existing =
+          OrganizationMembership.fromMap(memberUid, memberSnap.data()!);
+      alreadyInGroup = existing.groupIds.contains(groupId);
+      roleValue = existing.role.firestoreValue;
+      joinedAt = existing.joinedAt;
+      if (!alreadyInGroup) {
+        await memberRef.update({
+          'groupIds': FieldValue.arrayUnion([groupId]),
+        });
+      }
+    }
+
+    await _userMembershipIndex(memberUid)?.doc(orgId).set(
+      {
+        'organizationId': orgId,
+        'role': roleValue,
+        'joinedAt': Timestamp.fromDate(joinedAt),
+      },
+      SetOptions(merge: true),
+    );
+
+    await _syncMemberGroupIndexes(
+      uid: memberUid,
+      orgId: orgId,
+      groupIds: [groupId],
+    );
+    await _syncGroupContentForMember(
+      orgId: orgId,
+      groupId: groupId,
+      memberUid: memberUid,
+    );
+    return alreadyInGroup;
+  }
+
   Future<void> updateMemberGroups({
     required String orgId,
     required String memberUid,
@@ -687,10 +766,18 @@ class OrganizationService {
       organizationName: invite.organizationName,
     );
 
+    final inviteRef =
+        _organizations.doc(orgId).collection('invites').doc(stableId);
+    final existingSnap = await inviteRef.get();
+    final payload = Map<String, dynamic>.from(repaired.toMap());
+    if (existingSnap.data()?['inviteEmailSentAt'] == null) {
+      payload['emailNotifyRequestedAt'] = FieldValue.serverTimestamp();
+    }
+
     final batch = _firestore.batch();
     batch.set(
-      _organizations.doc(orgId).collection('invites').doc(stableId),
-      repaired.toMap(),
+      inviteRef,
+      payload,
       SetOptions(merge: true),
     );
     batch.set(
@@ -748,6 +835,8 @@ class OrganizationService {
     required String email,
     AdminRole role = AdminRole.member,
     List<String> groupIds = const [],
+    String? emailSubject,
+    String? emailText,
   }) async {
     await _ensureCreatorMembership(orgId);
     await _ensureInviteSendPermission(orgId, role);
@@ -776,7 +865,13 @@ class OrganizationService {
       organizationName: org.name,
     );
 
+    // Path: organizations/{orgId}/invites/{stableId} — not groupInvites.
+    // First send creates the doc; the same email is merged on re-invite.
     final payload = invite.toMap();
+    final subject = emailSubject?.trim() ?? '';
+    final body = emailText?.trim() ?? '';
+    if (subject.isNotEmpty) payload['emailSubject'] = subject;
+    if (body.isNotEmpty) payload['emailText'] = body;
 
     final batch = _firestore.batch();
     batch.set(

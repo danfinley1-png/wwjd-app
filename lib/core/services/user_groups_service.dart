@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../admin/config/admin_config.dart';
+import '../platform_admin_claim.dart';
+import '../firestore_resilience.dart';
 import '../../admin/models/ministry_group.dart';
 import '../../admin/models/organization_membership.dart';
 import '../models/shareable_group.dart';
@@ -44,24 +46,19 @@ class UserGroupsService {
   }
 
   Stream<bool> _watchIsSuperAdmin() {
-    final user = _auth.currentUser;
-    if (user == null) return Stream.value(false);
-    if (AdminConfig.isFoundationAdmin(user.email)) {
-      return Stream.value(true);
-    }
-    return _firestore
-        .collection('platformAdmins')
-        .doc(user.uid)
-        .snapshots()
-        .map((snap) => snap.exists);
+    return PlatformAdminClaim.watchPlatformAdmin(_auth);
   }
 
   Stream<List<ShareableGroup>> _watchAllPlatformShareableGroups() {
-    return _firestore
-        .collection('organizations')
-        .orderBy('name')
-        .snapshots()
-        .asyncMap((_) => _loadAllPlatformShareableGroups());
+    return firestoreStreamWithFallback(
+      _firestore
+          .collection('organizations')
+          .orderBy('name')
+          .snapshots()
+          .asyncMap((_) => _loadAllPlatformShareableGroups()),
+      const [],
+      debugLabel: 'shareableGroupsAllOrgs',
+    );
   }
 
   Stream<List<ShareableGroup>> _watchMemberShareableGroups(String uid) {
@@ -94,11 +91,7 @@ class UserGroupsService {
   }
 
   Future<bool> _isSuperAdminNow() async {
-    final user = _auth.currentUser;
-    if (user == null) return false;
-    if (AdminConfig.isFoundationAdmin(user.email)) return true;
-    final snap = await _firestore.collection('platformAdmins').doc(user.uid).get();
-    return snap.exists;
+    return PlatformAdminClaim.isPlatformAdmin(_auth);
   }
 
   Future<List<ShareableGroup>> _loadAllPlatformShareableGroups() async {

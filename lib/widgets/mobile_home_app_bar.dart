@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../core/config.dart';
 import '../core/mobile_touch.dart';
+import 'wwjd_brand_title.dart';
 
 /// Taller, touch-friendly app bar for phone / mobile web (drawer layout).
 class MobileHomeAppBar extends StatelessWidget implements PreferredSizeWidget {
@@ -14,8 +14,7 @@ class MobileHomeAppBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback onOpenMenu;
   final VoidCallback onSignOut;
 
-  /// Room for logo, full title, and readable tagline on iPhone.
-  static const double toolbarHeight = 122;
+  static const double toolbarHeight = 72;
 
   @override
   Size get preferredSize => const Size.fromHeight(toolbarHeight);
@@ -31,55 +30,7 @@ class MobileHomeAppBar extends StatelessWidget implements PreferredSizeWidget {
         onPressed: onOpenMenu,
         style: mobileIconButtonStyle(context),
       ),
-      title: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.asset(
-              'assets/images/wwjd_header.jpg',
-              height: 54,
-              width: 54,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Icon(
-                Icons.church,
-                size: 54,
-                color: Colors.white.withValues(alpha: 0.9),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  AppConfig.mobileDisplayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  AppConfig.tagline,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    height: 1.28,
-                    color: Colors.white.withValues(alpha: 0.9),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+      title: const WwjdBrandTitle(),
       actions: [
         Padding(
           padding: const EdgeInsets.only(right: 4),

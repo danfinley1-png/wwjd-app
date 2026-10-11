@@ -6,9 +6,13 @@ const { getStorage } = require("firebase-admin/storage");
 const { registerInstitutionalFunctions } = require("./institutional");
 const { registerInstitutionalEmailFunctions } = require("./institutional_emails");
 const { registerUsageReportFunctions } = require("./usage_report");
+const { registerUserDirectoryFunctions } = require("./user_directory");
+const { registerQuestionThemeFunctions } = require("./question_theme");
 const { registerNearbyParishes } = require("./nearby_parishes");
 const { registerOrgLogoFunctions } = require("./org_logo");
+const { registerSaintVideoFunctions } = require("./saint_video");
 const { randomUUID } = require("crypto");
+const { consumeChatQuota } = require("./chat_quota");
 
 const xaiApiKey = defineSecret("XAI_API_KEY");
 
@@ -23,8 +27,87 @@ function buildDownloadUrl(bucketName, objectPath, token) {
   return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encoded}?alt=media&token=${token}`;
 }
 
+const CHAT_MAX_BODY_BYTES = 256 * 1024;
+const CHAT_MAX_MESSAGES = 32;
+/** WWJD system prompt is large; only cap user/assistant per message. */
+const CHAT_MAX_SYSTEM_CHARS = 120_000;
+const CHAT_MAX_USER_CHARS = 32_000;
+const CHAT_MAX_OTHER_MESSAGE_CHARS = 16_000;
+const CHAT_MAX_TOTAL_CHARS = 200_000;
+const CHAT_MAX_TOKENS = 1400;
+
+function chatMessageCharLimit(role) {
+  if (role === "system") return CHAT_MAX_SYSTEM_CHARS;
+  if (role === "user") return CHAT_MAX_USER_CHARS;
+  return CHAT_MAX_OTHER_MESSAGE_CHARS;
+}
+
+function readBearerIdToken(req) {
+  const authHeader = req.headers.authorization || "";
+  return authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+}
+
+async function requireAuth(req, res) {
+  const idToken = readBearerIdToken(req);
+  if (!idToken) {
+    res.status(401).json({ error: "Sign in required" });
+    return null;
+  }
+  try {
+    return await getAuth().verifyIdToken(idToken);
+  } catch (err) {
+    console.error("chatCompletions auth error:", err);
+    res.status(401).json({
+      error: "Invalid or expired sign-in. Please sign in again.",
+    });
+    return null;
+  }
+}
+
+function validateChatPayload(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return "Invalid request body";
+  }
+  const messages = body.messages;
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return "messages array is required";
+  }
+  if (messages.length > CHAT_MAX_MESSAGES) {
+    return "Too many messages";
+  }
+  let totalChars = 0;
+  for (const msg of messages) {
+    if (!msg || typeof msg !== "object") {
+      return "Invalid message";
+    }
+    const content = msg.content;
+    if (typeof content !== "string") {
+      return "Invalid message content";
+    }
+    const role = typeof msg.role === "string" ? msg.role : "";
+    const limit = chatMessageCharLimit(role);
+    if (content.length > limit) {
+      return "Message too long";
+    }
+    totalChars += content.length;
+  }
+  if (totalChars > CHAT_MAX_TOTAL_CHARS) {
+    return "Prompt too long";
+  }
+  return null;
+}
+
+function sanitizeChatPayload(body) {
+  const out = { ...body };
+  const maxTokens = Number(out.max_tokens);
+  if (!Number.isFinite(maxTokens) || maxTokens > CHAT_MAX_TOKENS) {
+    out.max_tokens = CHAT_MAX_TOKENS;
+  }
+  return out;
+}
+
 /**
- * Proxies xAI chat completions for the Flutter web app (avoids browser CORS).
+ * Proxies xAI chat completions (Firebase Auth required).
  * Hosting rewrite: /api/chat -> this function.
  */
 exports.chatCompletions = onRequest(
@@ -45,11 +128,36 @@ exports.chatCompletions = onRequest(
       return;
     }
 
+    const contentLength = parseInt(req.headers["content-length"] || "0", 10);
+    if (contentLength > CHAT_MAX_BODY_BYTES) {
+      res.status(413).json({ error: "Request too large" });
+      return;
+    }
+
+    const decoded = await requireAuth(req, res);
+    if (!decoded) {
+      return;
+    }
+
+    const validationError = validateChatPayload(req.body);
+    if (validationError) {
+      res.status(400).json({ error: validationError });
+      return;
+    }
+
+    const quotaResult = await consumeChatQuota(decoded);
+    if (!quotaResult.ok) {
+      res.status(quotaResult.status).json(quotaResult.body);
+      return;
+    }
+
     const key = xaiApiKey.value();
     if (!key) {
       res.status(500).json({ error: "XAI_API_KEY secret is not configured" });
       return;
     }
+
+    const payload = sanitizeChatPayload(req.body);
 
     try {
       const upstream = await fetch("https://api.x.ai/v1/chat/completions", {
@@ -58,7 +166,7 @@ exports.chatCompletions = onRequest(
           "Content-Type": "application/json",
           Authorization: `Bearer ${key}`,
         },
-        body: JSON.stringify(req.body),
+        body: JSON.stringify(payload),
       });
 
       const body = await upstream.text();
@@ -205,5 +313,8 @@ exports.uploadProfilePhoto = onRequest(
 registerInstitutionalFunctions(exports);
 registerInstitutionalEmailFunctions(exports);
 registerUsageReportFunctions(exports);
+registerUserDirectoryFunctions(exports);
+registerQuestionThemeFunctions(exports);
 registerNearbyParishes(exports);
 registerOrgLogoFunctions(exports);
+registerSaintVideoFunctions(exports);

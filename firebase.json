@@ -26,6 +26,53 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "headers": [
+      {
+        "source": "/",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/index.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/flutter_service_worker.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/flutter.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/flutter_bootstrap.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      }
+    ],
     "rewrites": [
       {
         "source": "/api/chat",
@@ -42,6 +89,18 @@
       {
         "source": "/api/org-logo",
         "function": "uploadOrgLogo"
+      },
+      {
+        "source": "/api/saint-video",
+        "function": "uploadSaintVideo"
+      },
+      {
+        "source": "/api/stream-saint-video",
+        "function": "streamSaintVideo"
+      },
+      {
+        "source": "/uploadSaintVideo",
+        "function": "uploadSaintVideo"
       },
       {
         "source": "/ensurePlatformAdmin",
@@ -66,6 +125,38 @@
       {
         "source": "/getUsageReport",
         "function": "getUsageReport"
+      },
+      {
+        "source": "/api/getUserDirectory",
+        "function": "getUserDirectory"
+      },
+      {
+        "source": "/getUserDirectory",
+        "function": "getUserDirectory"
+      },
+      {
+        "source": "/api/resendDirectoryInvite",
+        "function": "resendDirectoryInvite"
+      },
+      {
+        "source": "/resendDirectoryInvite",
+        "function": "resendDirectoryInvite"
+      },
+      {
+        "source": "/api/recordQuestionTheme",
+        "function": "recordQuestionTheme"
+      },
+      {
+        "source": "/recordQuestionTheme",
+        "function": "recordQuestionTheme"
+      },
+      {
+        "source": "/api/getQuestionThemeReport",
+        "function": "getQuestionThemeReport"
+      },
+      {
+        "source": "/getQuestionThemeReport",
+        "function": "getQuestionThemeReport"
       },
       {
         "source": "**",

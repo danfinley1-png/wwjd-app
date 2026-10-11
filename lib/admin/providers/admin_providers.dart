@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/firestore_resilience.dart';
 import '../../core/providers/app_providers.dart';
+import '../../models/product_feedback.dart';
+import '../../models/saint_video.dart';
 import '../../core/services/service_hour_entry_service.dart';
 import '../config/admin_config.dart';
 import '../models/admin_role.dart';
@@ -24,6 +27,8 @@ import '../services/org_calendar_service.dart';
 import '../services/platform_admin_service.dart';
 import '../services/service_project_service.dart';
 import '../services/usage_report_service.dart';
+import '../services/user_directory_service.dart';
+import '../services/question_theme_report_service.dart';
 import '../models/service_hours.dart';
 
 final organizationServiceProvider = Provider<OrganizationService>((ref) {
@@ -40,6 +45,38 @@ final platformAdminServiceProvider = Provider<PlatformAdminService>((ref) {
 
 final usageReportServiceProvider = Provider<UsageReportService>((ref) {
   return UsageReportService();
+});
+
+final userDirectoryServiceProvider = Provider<UserDirectoryService>((ref) {
+  return UserDirectoryService();
+});
+
+final questionThemeReportServiceProvider =
+    Provider<QuestionThemeReportService>((ref) {
+  return QuestionThemeReportService();
+});
+
+final productFeedbackListProvider =
+    StreamProvider<List<ProductFeedback>>((ref) {
+  if (ref.watch(isSuperAdminProvider).valueOrNull != true) {
+    return Stream.value(const <ProductFeedback>[]);
+  }
+  return ref.watch(productFeedbackServiceProvider).watchFeedback();
+});
+
+final replyHelpfulVotesProvider =
+    StreamProvider<List<ReplyHelpfulVote>>((ref) {
+  if (ref.watch(isSuperAdminProvider).valueOrNull != true) {
+    return Stream.value(const <ReplyHelpfulVote>[]);
+  }
+  return ref.watch(productFeedbackServiceProvider).watchHelpfulVotes();
+});
+
+final adminSaintsProvider = StreamProvider<List<SaintEntry>>((ref) {
+  if (ref.watch(isSuperAdminProvider).valueOrNull != true) {
+    return Stream.value(const <SaintEntry>[]);
+  }
+  return ref.watch(saintsServiceProvider).watchAll();
 });
 
 final groupInviteServiceProvider = Provider<GroupInviteService>((ref) {
@@ -245,9 +282,11 @@ final pendingOrgInvitesForUserProvider =
     if (email == null || email.isEmpty) {
       return Stream.value(const <OrganizationInvite>[]);
     }
-    return ref
-        .read(organizationServiceProvider)
-        .watchPendingOrgInvitesForEmail(email);
+    return firestoreStreamWithFallback(
+      ref.read(organizationServiceProvider).watchPendingOrgInvitesForEmail(email),
+      const [],
+      debugLabel: 'pendingOrgInvites',
+    );
   });
 });
 
@@ -327,6 +366,13 @@ final organizationGroupGiftsProvider =
       );
 });
 
+/// Every group Gift in one organization. Overall administrator only.
+final organizationAllGiftsProvider =
+    FutureProvider.family<List<OrganizationGiftEntry>, String>((ref, orgId) async {
+  if (ref.watch(isSuperAdminProvider).valueOrNull != true) return const [];
+  return ref.watch(groupGiftServiceProvider).loadGiftsForOrganization(orgId);
+});
+
 final pendingGroupInvitesForUserProvider =
     StreamProvider<List<GroupMembershipInvite>>((ref) {
   final auth = ref.watch(authServiceProvider);
@@ -334,12 +380,17 @@ final pendingGroupInvitesForUserProvider =
     if (user == null) {
       return Stream.value(const <GroupMembershipInvite>[]);
     }
-    return ref.read(groupInviteServiceProvider).watchPendingInvitesForUid(user.uid);
+    return firestoreStreamWithFallback(
+      ref.read(groupInviteServiceProvider).watchPendingInvitesForUid(user.uid),
+      const [],
+      debugLabel: 'pendingGroupInvites',
+    );
   });
 });
 
 /// True when the current user may view Pastoral Insights for [orgId].
 final canViewOrgInsightsProvider = Provider.family<bool, String>((ref, orgId) {
+  if (ref.watch(isSuperAdminProvider).valueOrNull == true) return true;
   final membership =
       ref.watch(organizationMembershipProvider(orgId)).valueOrNull;
   return membership?.role.canViewPastoralInsights ?? false;

@@ -13,7 +13,9 @@ import '../models/organization_membership.dart';
 import '../providers/admin_providers.dart';
 import '../services/group_invite_service.dart';
 import '../services/organization_service.dart';
+import '../email/institutional_email_copy.dart';
 import '../widgets/admin_hierarchy_hint.dart';
+import '../widgets/email_preview_dialog.dart';
 import '../widgets/role_gate.dart';
 import '../../widgets/group_brand_mark.dart';
 import 'bulk_provision_users_screen.dart';
@@ -23,6 +25,7 @@ import 'group_gifts_screen.dart';
 import 'group_members_screen.dart';
 import 'group_schedules_screen.dart';
 import 'invite_members_screen.dart';
+import 'org_gifts_screen.dart';
 import 'org_pastoral_insights_screen.dart';
 import 'org_calendar_admin_screen.dart';
 import 'org_service_projects_screen.dart';
@@ -40,7 +43,6 @@ class OrganizationDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final orgAsync = ref.watch(organizationProvider(orgId));
-    final canViewInsights = ref.watch(canViewOrgInsightsProvider(orgId));
     final isAdmin = ref.watch(isOrganizationAdminProvider(orgId));
     final canManageGroups = ref.watch(canManageOrgGroupsProvider(orgId));
 
@@ -135,7 +137,7 @@ class OrganizationDetailScreen extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 RoleGate(
-                  allowed: canViewInsights,
+                  allowed: isAdmin,
                   child: FloatingActionButton.extended(
                     heroTag: 'insights',
                     onPressed: () {
@@ -148,10 +150,10 @@ class OrganizationDetailScreen extends ConsumerWidget {
                       );
                     },
                     icon: const Icon(Icons.insights_outlined),
-                    label: const Text('Pastoral Insights'),
+                    label: const Text('Question themes'),
                   ),
                 ),
-                if (canViewInsights) const SizedBox(height: 12),
+                if (isAdmin) const SizedBox(height: 12),
                 RoleGate(
                   allowed: isAdmin,
                   child: FloatingActionButton.extended(
@@ -166,7 +168,7 @@ class OrganizationDetailScreen extends ConsumerWidget {
                       );
                     },
                     icon: const Icon(Icons.upload_file_outlined),
-                    label: const Text('Bulk add users'),
+                    label: const Text('Bulk add'),
                   ),
                 ),
                 if (isAdmin) const SizedBox(height: 12),
@@ -221,6 +223,7 @@ class _GroupsTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final groupsAsync = ref.watch(organizationGroupsProvider(orgId));
+    final isOverall = ref.watch(isSuperAdminProvider).valueOrNull ?? false;
     final members =
         ref.watch(organizationMembersProvider(orgId)).valueOrNull ?? const [];
     final invites =
@@ -252,6 +255,31 @@ class _GroupsTab extends ConsumerWidget {
             const SizedBox(height: 12),
             const AdminHierarchyHint(compact: true),
             const SizedBox(height: 12),
+            if (isOverall) ...[
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.card_giftcard_outlined),
+                  title: const Text('Organization and group Gifts'),
+                  subtitle: const Text(
+                    'Delete a Gift for one group, or for every group in this '
+                    'organization that shares it.',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => OrgGiftsScreen(
+                          orgId: orgId,
+                          organizationName: orgName,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             if (isAdmin) ...[
               Card(
                 child: ListTile(
@@ -941,7 +969,7 @@ class _MembersTab extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Send invitation'),
+            child: const Text('Review invitation'),
           ),
         ],
       ),
@@ -949,13 +977,42 @@ class _MembersTab extends ConsumerWidget {
 
     if (sent != true || selected == null || !context.mounted) return;
 
+    final inviteeEmail = member.email?.trim() ?? '';
+    if (inviteeEmail.isEmpty || !inviteeEmail.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This member does not have an email address on file, so WWJD-DI '
+            'cannot send the invitation message.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final copy = InstitutionalEmailCopy.groupInvite(
+      groupName: selected!.name,
+      organizationName: orgName,
+    );
+    final draft = await showEmailPreviewDialog(
+      context: context,
+      title: 'Preview invitation',
+      toLabel: inviteeEmail,
+      subject: copy.subject,
+      body: copy.text,
+    );
+    if (draft == null || !context.mounted) return;
+
     try {
+      final overrides = draft.overrideFields;
       await inviteService.inviteMemberToGroup(
         orgId: orgId,
         member: member,
         groupId: selected!.id,
         groupName: selected!.name,
         organizationName: orgName,
+        emailSubject: overrides['emailSubject'],
+        emailText: overrides['emailText'],
       );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

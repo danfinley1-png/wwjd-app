@@ -38,8 +38,7 @@ extension AdminRoleLabels on AdminRole {
 
   bool get canInviteMembers => canManageOrganization;
 
-  bool get canViewPastoralInsights =>
-      this == AdminRole.orgAdmin || this == AdminRole.groupLeader;
+  bool get canViewPastoralInsights => this == AdminRole.orgAdmin;
 }
 
 AdminRole adminRoleFromFirestore(String? value) {

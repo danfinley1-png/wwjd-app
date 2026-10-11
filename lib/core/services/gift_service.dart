@@ -36,7 +36,11 @@ class GiftService {
     return firestoreSnapshotsRetrying(
       auth: _auth,
       snapshots: () => query.snapshots(),
-    ).map((snap) => snap.docs.map(_fromDoc).toList());
+    ).map((snap) {
+      final gifts = snap.docs.map(_fromDoc).toList();
+      gifts.sort(GiftActivity.compareDisplayOrder);
+      return gifts;
+    });
   }
 
   /// One-time load
@@ -48,7 +52,9 @@ class GiftService {
       auth: _auth,
       get: () => col.orderBy('createdAt', descending: true).get(),
     );
-    return snap.docs.map((doc) => _fromDoc(doc)).toList();
+    final gifts = snap.docs.map((doc) => _fromDoc(doc)).toList();
+    gifts.sort(GiftActivity.compareDisplayOrder);
+    return gifts;
   }
 
   GiftActivity _fromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {

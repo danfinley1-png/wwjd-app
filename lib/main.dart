@@ -11,6 +11,7 @@ import 'core/gift_reminder_bootstrap.dart';
 import 'core/analytics/usage_analytics_bootstrap.dart';
 import 'core/routing/app_router.dart';
 import 'widgets/account_setup_gate.dart';
+import 'widgets/pwa_update_banner.dart';
 import 'firebase_options.dart';
 import 'package:go_router/go_router.dart';
 
@@ -48,9 +49,11 @@ class WWJDApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
       routerConfig: router,
-      builder: (context, child) => AccountSetupGate(
-        child: UsageAnalyticsBootstrap(
-          child: GiftReminderBootstrap(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => PwaUpdateBanner(
+        child: AccountSetupGate(
+          child: UsageAnalyticsBootstrap(
+            child: GiftReminderBootstrap(child: child ?? const SizedBox.shrink()),
+          ),
         ),
       ),
     );

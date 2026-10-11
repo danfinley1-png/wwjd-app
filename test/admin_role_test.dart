@@ -11,12 +11,12 @@ void main() {
       expect(role.canViewPastoralInsights, isTrue);
     });
 
-    test('groupLeader can manage groups and view insights only', () {
+    test('groupLeader can manage groups but not the question theme report', () {
       const role = AdminRole.groupLeader;
       expect(role.canManageOrganization, isFalse);
       expect(role.canManageGroups, isTrue);
       expect(role.canInviteMembers, isFalse);
-      expect(role.canViewPastoralInsights, isTrue);
+      expect(role.canViewPastoralInsights, isFalse);
     });
 
     test('member has no admin capabilities', () {

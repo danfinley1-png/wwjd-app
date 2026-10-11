@@ -79,6 +79,42 @@ class _ActivityDetailScreenState extends ConsumerState<ActivityDetailScreen> {
     widget.onUpdate(updated);
   }
 
+  Future<void> _confirmDeleteGift() async {
+    final isGroup = _activity.isGroupGift;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this Gift?'),
+        content: Text(
+          isGroup
+              ? '“${_activity.title}” will be removed from your Sharing My Gifts list. The group still has it.'
+              : '“${_activity.title}” will be removed from your Sharing My Gifts list.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ref.read(giftServiceProvider).deleteGift(_activity.id);
+      if (!mounted) return;
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete this Gift: $e')),
+      );
+    }
+  }
+
   Future<void> _saveActivityDetails() async {
     final title = _titleController.text.trim();
     final description = _descriptionController.text.trim();
@@ -264,6 +300,16 @@ class _ActivityDetailScreenState extends ConsumerState<ActivityDetailScreen> {
       appBar: AppBar(
         title: const Text('Activity Detail'),
         centerTitle: true,
+        actions: [
+          TextButton.icon(
+            onPressed: _confirmDeleteGift,
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.textOnMaroon,
+            ),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),

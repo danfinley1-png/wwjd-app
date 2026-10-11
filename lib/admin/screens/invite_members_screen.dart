@@ -1,16 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../email/institutional_email_copy.dart';
 import '../models/admin_role.dart';
 import '../providers/admin_providers.dart';
+import '../widgets/email_preview_dialog.dart';
 
 class InviteMembersScreen extends ConsumerStatefulWidget {
   const InviteMembersScreen({
     super.key,
     required this.orgId,
+    this.initialEmail,
+    this.initialGroupIds = const [],
   });
 
   final String orgId;
+  final String? initialEmail;
+  final List<String> initialGroupIds;
 
   @override
   ConsumerState<InviteMembersScreen> createState() =>
@@ -24,20 +30,67 @@ class _InviteMembersScreenState extends ConsumerState<InviteMembersScreen> {
   bool _saving = false;
 
   @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialEmail?.trim() ?? '';
+    if (initial.isNotEmpty) {
+      _emailController.text = initial;
+    }
+    _selectedGroupIds.addAll(
+      widget.initialGroupIds.where((id) => id.trim().isNotEmpty),
+    );
+  }
+
+  @override
   void dispose() {
     _emailController.dispose();
     super.dispose();
   }
 
-  Future<void> _sendInvite() async {
+  Future<void> _reviewInvite() async {
     if (_saving) return;
+    final email = _emailController.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid email address.')),
+      );
+      return;
+    }
+
+    final org = ref.read(organizationProvider(widget.orgId)).valueOrNull;
+    final groups =
+        ref.read(organizationGroupsProvider(widget.orgId)).valueOrNull ??
+            const [];
+    final groupNames = groups
+        .where((g) => _selectedGroupIds.contains(g.id))
+        .map((g) => g.name)
+        .toList();
+    final copy = InstitutionalEmailCopy.organizationInvite(
+      inviteeEmail: email,
+      organizationName: org?.name ?? 'your organization',
+      role: _role,
+      groupNames: groupNames,
+    );
+
+    final draft = await showEmailPreviewDialog(
+      context: context,
+      title: 'Preview invitation',
+      toLabel: email,
+      subject: copy.subject,
+      body: copy.text,
+    );
+    if (draft == null || !mounted) return;
+
     setState(() => _saving = true);
     try {
+      final overrides = draft.overrideFields;
       await ref.read(organizationServiceProvider).createInvite(
             orgId: widget.orgId,
-            email: _emailController.text,
+            email: email,
             role: _role,
             groupIds: _selectedGroupIds.toList(),
+            emailSubject: overrides['emailSubject'],
+            emailText: overrides['emailText'],
           );
       if (!mounted) return;
       Navigator.pop(context);
@@ -150,14 +203,14 @@ class _InviteMembersScreenState extends ConsumerState<InviteMembersScreen> {
           ),
           const SizedBox(height: 24),
           FilledButton(
-            onPressed: _saving ? null : _sendInvite,
+            onPressed: _saving ? null : _reviewInvite,
             child: _saving
                 ? const SizedBox(
                     width: 22,
                     height: 22,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Send invitation'),
+                : const Text('Review invitation'),
           ),
         ],
       ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/walk_together_journey.dart';
 import '../content_guidance/content_guidance_models.dart';
 import '../content_guidance/shared_content_gate.dart';
+import '../insights/question_theme_recorder.dart';
 import '../gift_share_payload.dart';
 import '../walk_together_gift_share.dart';
 
@@ -93,6 +95,9 @@ class WalkTogetherService {
     );
 
     await docRef.set(journey.toMap());
+    unawaited(
+      QuestionThemeRecorder.instance.recordWalkTogetherQuestion(trimmedQuestion),
+    );
     return true;
   }
 

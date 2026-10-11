@@ -41,6 +41,8 @@ class GiftActivity {
   final String? organizationId;
   final String? organizationName;
   final String? groupLogoUrl;
+  /// Administrator order for a group Gift. Lower comes first.
+  final int? sortOrder;
 
   GiftActivity({
     required this.id,
@@ -73,6 +75,7 @@ class GiftActivity {
     this.organizationId,
     this.organizationName,
     this.groupLogoUrl,
+    this.sortOrder,
   });
 
   /// Optional link back to the chat conversation that suggested this gift.
@@ -83,6 +86,22 @@ class GiftActivity {
   bool get isGroupGift => source == GiftActivitySource.groupGift;
 
   bool get isPersonal => !isGroupGift;
+
+  /// Group gifts follow the administrator's order. Other gifts stay newest-first.
+  static int compareDisplayOrder(GiftActivity a, GiftActivity b) {
+    final ao = a.sortOrder;
+    final bo = b.sortOrder;
+    if (a.isGroupGift &&
+        b.isGroupGift &&
+        ao != null &&
+        bo != null &&
+        ao != bo) {
+      return ao.compareTo(bo);
+    }
+    final at = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final bt = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+    return bt.compareTo(at);
+  }
 
   /// Members may complete and note a group Gift, but not change its definition.
   bool get definitionLocked => isGroupGift;
@@ -156,6 +175,7 @@ class GiftActivity {
         'organizationName': organizationName,
       if (groupLogoUrl != null && groupLogoUrl!.isNotEmpty)
         'groupLogoUrl': groupLogoUrl,
+      if (sortOrder != null) 'sortOrder': sortOrder,
     };
   }
 
@@ -215,6 +235,7 @@ class GiftActivity {
       organizationId: map['organizationId']?.toString(),
       organizationName: map['organizationName']?.toString(),
       groupLogoUrl: map['groupLogoUrl']?.toString(),
+      sortOrder: (map['sortOrder'] as num?)?.toInt(),
     );
   }
 
@@ -269,6 +290,7 @@ class GiftActivity {
     String? organizationId,
     String? organizationName,
     String? groupLogoUrl,
+    int? sortOrder,
   }) {
     return GiftActivity(
       id: id ?? this.id,
@@ -301,6 +323,7 @@ class GiftActivity {
       organizationId: organizationId ?? this.organizationId,
       organizationName: organizationName ?? this.organizationName,
       groupLogoUrl: groupLogoUrl ?? this.groupLogoUrl,
+      sortOrder: sortOrder ?? this.sortOrder,
     );
   }
 }

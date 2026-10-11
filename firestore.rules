@@ -1,111 +1,159 @@
 rules_version = '2';
 
-// Assumed Data Model (school / organization calendar)
-// Collection: organizations/{orgId}/invites/{inviteId}
-//   email, status pending|accepted|revoked, role, groupIds, invitedByUid
-//   Invitee (matching email) may set status to accepted|revoked and acceptedAt/acceptedByUid
-// Collection: emailInvites/{emailKey}/items/{inviteId} — same payload, invitee inbox
-// Collection: pendingOrgJoinsByEmail/{emailKey}/orgs/{orgId} — delivery marker; invitee may delete
-// Collection: organizations/{orgId}/calendarSchedules/default
-//   - organizationId: string (required, immutable, must equal orgId)
-//   - visibility: organization|groups
-//   - groupIds: list <= 30 (empty iff visibility == organization)
-//   - rows: list <= 80 of maps:
-//       id, title (1-200), whenText (1-200, freeform When),
-//       location (<=200), notes (<=2000), sortOrder
-//       optional startAt/endAt timestamps and allDay from earlier dated events
-//   - createdByUid: string (required, immutable)
-//   - createdAt: timestamp (immutable)
-//   - updatedByUid: string (must equal auth uid)
-//   - updatedAt: timestamp
-// Collection: organizations/{orgId}/calendarEvents/{eventId} (legacy dated events)
-// Collection: organizations/{orgId}
-//   - logoUrl: string optional <= 2000 — single org brand; groups inherit it
-// Collection: organizations/{orgId}/groups/{groupId}/gifts/{giftId}
-//   Canonical group-owned My Gifts definition (not private spiritual content)
-//   - organizationId: string (required, immutable, must equal orgId)
-//   - groupId: string (required, immutable, must equal groupId)
-//   - groupName, organizationName: string optional
-//   - title: string 1-200
-//   - description: string 1-4000
-//   - linkedPrayerId: string optional <= 80
-//   - frequency: Daily|Weekly|Monthly|One-time
-//   - specificTime: string optional <= 16 (HH:mm)
-//   - daysOfWeek: list optional
-//   - active: bool
-//   - logoUrl: string optional <= 2000
-//   - sharedFromGiftId, sharedFromGroupId: optional <= 128 when copied to another group
-//   - createdByUid: string (required, immutable)
-//   - createdAt, updatedAt: timestamp
-// Member copies: users/{uid}/gifts/{giftId} with source == 'groupGift'
-//   Org admins and group leaders (for groups they lead) may create/update those
-//   copies only for members of that group. They cannot read other users'
-//   personal gifts, chat, reflections, or history.
-// Personal spiritual collections (chat, reflections, history, personal gifts)
-// remain inaccessible to organization administrators.
-//
-// Collection: serviceProjects/{projectId}
-//   Institutional volunteer projects (not personal spiritual content)
-//   - orgId: string required, immutable
-//   - title: string 1-200
-//   - description: string <= 4000
-//   - scope, location: string optional <= 200 / 300
-//   - startDate, endDate: timestamp optional (inclusive window)
-//   - assignmentType: organization|groups
-//   - assignedGroupIds: list <= 30 (empty iff assignmentType == organization)
-//   - mode: selfReported|requiresApproval
-//   - approverUids: list <= 20 (required when live + requiresApproval)
-//   - status: active|inactive
-//   - source: admin|memberProposed (default admin for legacy docs)
-//   - proposedByUid: string optional; required when source == memberProposed
-//   - proposalStatus: none|submitted|approved|rejected|returned
-//   - proposalNote, rejectionReason: optional admin strings <= 2000
-//   - nominatedApproverUids: list <= 20 (member suggestion only)
-//   - createdBy: uid string required, immutable
-//   - createdAt: timestamp immutable
-//   - updatedAt: timestamp
-// Collection: serviceHourEntries/{entryId}
-//   Hours metadata only. NEVER store reflection body/text/journal fields.
-//   - projectId, orgId, userId: string required, immutable
-//   - source: admin|memberProposed (copied from the project at create)
-//   - date: timestamp (service day)
-//   - hours: number 0 < hours <= 24
-//   - note: string optional <= 2000 (public-to-org-admin metadata, not a reflection)
-//   - status: logged|pending|approved|rejected
-//   - submittedAt: timestamp immutable
-//   - reviewedBy, reviewedAt, reviewNote: optional; approver review only
-//   - reflectionId: optional <= 128 pointer to users/{uid}/reflections/{id}
-// Private service reflections: users/{uid}/reflections/{threadId}
-//   source == "service", linkedServiceProjectId + linkedServiceEntryId
-//   Owner-only; admins/approvers never read reflection text.
+// WWJD-DI — minimal Firestore rules (default deny).
+// Public: published saints, share links, TTS config.
+// Signed-in: own users/{uid}/…, aggregate usage counters.
+// Admin claim: saint writes, draft saint reads, usage reports.
 
 service cloud.firestore {
-
   match /databases/{database}/documents {
 
-    function isSignedIn() {
-
+    function signedIn() {
       return request.auth != null;
-
     }
 
+    function isUser(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
 
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
 
-    function normalizedAuthEmail() {
+    // Same check as PlatformAdminClaim: token.admin, or the foundation email
+    // on the ID token (the client does not require email_verified).
+    function isFoundationAdmin() {
+      return signedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower() == 'dan.finley@verizon.net';
+    }
 
-      return request.auth.token.email.lower();
+    function isVerifiedPlatformAdmin() {
+      return isAdmin()
+        || isFoundationAdmin()
+        || (
+          signedIn()
+          && exists(/databases/$(database)/documents/platformAdmins/$(request.auth.uid))
+          && get(/databases/$(database)/documents/platformAdmins/$(request.auth.uid)).data.get('role', '') == 'superAdmin'
+        );
+    }
 
+    function hasOrgMembership(orgId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+    }
+
+    function orgMemberRole(orgId) {
+      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.get('role', '');
+    }
+
+    function isOrgCreator(orgId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organizations/$(orgId))
+        && get(/databases/$(database)/documents/organizations/$(orgId)).data.get('createdByUid', '') == request.auth.uid;
+    }
+
+    // Org-scoped admin: role on the membership doc, or the org creator.
+    function isOrgAdmin(orgId) {
+      return isOrgCreator(orgId)
+        || (hasOrgMembership(orgId) && orgMemberRole(orgId) == 'orgAdmin');
+    }
+
+    function isGroupLeader(orgId) {
+      return hasOrgMembership(orgId) && orgMemberRole(orgId) == 'groupLeader';
+    }
+
+    // Single-group get for a member. Not a list: groupId must be on their membership.
+    function isGroupMember(orgId, groupId) {
+      return hasOrgMembership(orgId)
+        && get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.get('groupIds', []).hasAny([groupId]);
+    }
+
+    function canManageGroupGifts(orgId, groupId) {
+      return isVerifiedPlatformAdmin()
+        || isOrgAdmin(orgId)
+        || (isGroupLeader(orgId) && isGroupMember(orgId, groupId));
+    }
+
+    function isValidGroupGiftDef(orgId, groupId) {
+      let d = request.resource.data;
+      return d.organizationId == orgId
+        && d.groupId == groupId
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
+        && d.description is string && d.description.size() > 0 && d.description.size() <= 4000
+        && d.frequency in ['Daily', 'Weekly', 'Monthly', 'One-time']
+        && d.active is bool
+        && d.createdByUid is string && d.createdByUid.size() > 0 && d.createdByUid.size() <= 128
+        && d.createdAt is timestamp
+        && (!('linkedPrayerId' in d) || (d.linkedPrayerId is string && d.linkedPrayerId.size() <= 128))
+        && (!('specificTime' in d) || (d.specificTime is string && d.specificTime.size() <= 16))
+        && (!('logoUrl' in d) || (d.logoUrl is string && d.logoUrl.size() <= 2000))
+        && (!('groupName' in d) || (d.groupName is string && d.groupName.size() <= 200))
+        && (!('organizationName' in d) || (d.organizationName is string && d.organizationName.size() <= 300))
+        && (!('daysOfWeek' in d) || d.daysOfWeek is list)
+        && (!('sharedFromGiftId' in d) || (d.sharedFromGiftId is string && d.sharedFromGiftId.size() <= 128))
+        && (!('sharedFromGroupId' in d) || (d.sharedFromGroupId is string && d.sharedFromGroupId.size() <= 128))
+        && (!('sortOrder' in d) || (d.sortOrder is int && d.sortOrder >= 0 && d.sortOrder <= 500))
+        && (!('updatedAt' in d) || d.updatedAt is timestamp);
+    }
+
+    function isValidGroupGiftCopy() {
+      let d = request.resource.data;
+      return d.source == 'groupGift'
+        && d.organizationId is string && d.organizationId.size() > 0 && d.organizationId.size() <= 128
+        && d.groupId is string && d.groupId.size() > 0 && d.groupId.size() <= 128
+        && d.userId is string && d.userId.size() > 0 && d.userId.size() <= 128
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200;
+    }
+
+    function memberHasGroup(orgId, memberId, groupId) {
+      return exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(memberId))
+        && get(/databases/$(database)/documents/organizations/$(orgId)/members/$(memberId)).data.get('groupIds', []).hasAny([groupId]);
+    }
+
+    function canManageOrgGroups(orgId) {
+      return isVerifiedPlatformAdmin()
+        || isOrgAdmin(orgId)
+        || isGroupLeader(orgId);
+    }
+
+    // Org invite delivery. Overall admin and org admin may invite any role.
+    // A group leader may invite members and group leaders only.
+    function canDeliverOrgInvite(orgId) {
+      return isVerifiedPlatformAdmin()
+        || isOrgAdmin(orgId)
+        || (
+          isGroupLeader(orgId)
+          && request.resource.data.role in ['member', 'groupLeader']
+        );
+    }
+
+    function isValidOrgInvite(orgId) {
+      let d = request.resource.data;
+      return d.organizationId == orgId
+        && d.email is string
+        && d.email.size() > 3
+        && d.email.size() <= 320
+        && d.role in ['member', 'groupLeader', 'orgAdmin']
+        && d.status in ['pending', 'accepted', 'revoked']
+        && d.groupIds is list
+        && d.groupIds.size() <= 40
+        && d.createdAt is timestamp
+        && (!('invitedByUid' in d) || (d.invitedByUid is string && d.invitedByUid.size() <= 128))
+        && (!('organizationName' in d) || (d.organizationName is string && d.organizationName.size() <= 300))
+        && (!('emailSubject' in d) || (d.emailSubject is string && d.emailSubject.size() <= 300))
+        && (!('emailText' in d) || (d.emailText is string && d.emailText.size() <= 20000))
+        && (!('acceptedAt' in d) || d.acceptedAt is timestamp)
+        && (!('acceptedByUid' in d) || (d.acceptedByUid is string && d.acceptedByUid.size() <= 128));
     }
 
     function inviteEmailMatchesAuth() {
-      return isSignedIn()
-        && request.auth.token.email != null
-        && resource.data.keys().hasAny(['email'])
+      return signedIn()
+        && request.auth.token.email is string
         && resource.data.email is string
-        && resource.data.email.lower() == normalizedAuthEmail();
+        && resource.data.email.lower() == request.auth.token.email.lower();
     }
 
-    /// Invitee may only mark their own pending org invite accepted or declined.
     function isValidOrgInviteeResponse() {
       return inviteEmailMatchesAuth()
         && resource.data.status == 'pending'
@@ -114,1296 +162,289 @@ service cloud.firestore {
             .hasOnly(['status', 'acceptedAt', 'acceptedByUid']);
     }
 
-
-
-    function isFoundationAdmin() {
-      return isSignedIn()
-        && request.auth.token.email != null
-        && normalizedAuthEmail() == 'dan.finley@verizon.net';
+    function hasPendingOrgJoin(orgId) {
+      return signedIn()
+        && request.auth.token.email is string
+        && exists(/databases/$(database)/documents/pendingOrgJoinsByEmail/$(request.auth.token.email.lower())/orgs/$(orgId));
     }
 
-    function isSuperAdmin() {
-      return isFoundationAdmin()
-        || (isSignedIn()
-          && exists(/databases/$(database)/documents/platformAdmins/$(request.auth.uid)));
-    }
-
-
-
-    function isOrganizationCreator(orgId) {
-
-      return isSignedIn()
-
-        && exists(/databases/$(database)/documents/organizations/$(orgId))
-
-        && get(/databases/$(database)/documents/organizations/$(orgId)).data.createdByUid == request.auth.uid;
-
-    }
-
-
-
-    function isOrgMember(orgId) {
-
-      return isSignedIn()
-
-        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
-
-    }
-
-
-
-    function orgMemberRole(orgId) {
-
-      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role;
-
-    }
-
-
-
-    function isOrgAdmin(orgId) {
-
-      return isSuperAdmin()
-
-        || isOrganizationCreator(orgId)
-
-        || (isOrgMember(orgId) && orgMemberRole(orgId) == 'orgAdmin');
-
-    }
-
-
-
-    function canManageGroups(orgId) {
-
-      return isSuperAdmin()
-
-        || isOrganizationCreator(orgId)
-
-        || (isOrgMember(orgId)
-
-          && orgMemberRole(orgId) in ['orgAdmin', 'groupLeader']);
-
-    }
-
-
-
-    function canInviteToGroup(orgId) {
-
-      return canManageGroups(orgId);
-
-    }
-
-
-
-    function isValidGroupGiftDef(orgId, groupId) {
-
+    function isValidMember(orgId) {
       let d = request.resource.data;
-
       return d.organizationId == orgId
-
-        && d.groupId == groupId
-
-        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
-
-        && d.description is string && d.description.size() > 0 && d.description.size() <= 4000
-
-        && d.frequency in ['Daily', 'Weekly', 'Monthly', 'One-time']
-
-        && d.active is bool
-
-        && d.createdByUid is string && d.createdByUid.size() > 0 && d.createdByUid.size() <= 128
-
-        && d.createdAt is timestamp
-
-        && (!('linkedPrayerId' in d) || (d.linkedPrayerId is string && d.linkedPrayerId.size() <= 128))
-
-        && (!('specificTime' in d) || (d.specificTime is string && d.specificTime.size() <= 16))
-
-        && (!('logoUrl' in d) || (d.logoUrl is string && d.logoUrl.size() <= 2000))
-
-        && (!('groupName' in d) || (d.groupName is string && d.groupName.size() <= 200))
-
-        && (!('organizationName' in d) || (d.organizationName is string && d.organizationName.size() <= 300))
-
-        && (!('daysOfWeek' in d) || d.daysOfWeek is list)
-
-        && (!('sharedFromGiftId' in d) || (d.sharedFromGiftId is string && d.sharedFromGiftId.size() <= 128))
-
-        && (!('sharedFromGroupId' in d) || (d.sharedFromGroupId is string && d.sharedFromGroupId.size() <= 128))
-
-        && (!('updatedAt' in d) || d.updatedAt is timestamp);
-
+        && d.role in ['member', 'groupLeader', 'orgAdmin']
+        && d.groupIds is list
+        && d.groupIds.size() <= 40
+        && d.joinedAt is timestamp
+        && (!('email' in d) || (d.email is string && d.email.size() <= 320))
+        && (!('displayName' in d) || (d.displayName is string && d.displayName.size() <= 200))
+        && (!('invitedByUid' in d) || (d.invitedByUid is string && d.invitedByUid.size() <= 128));
     }
 
-
-
-    function isValidGroupGiftCopy() {
-
+    function isValidGroupInviteCreate(orgId) {
       let d = request.resource.data;
-
-      return d.source == 'groupGift'
-
-        && d.organizationId is string && d.organizationId.size() > 0 && d.organizationId.size() <= 128
-
+      return d.organizationId == orgId
         && d.groupId is string && d.groupId.size() > 0 && d.groupId.size() <= 128
-
-        && d.userId is string && d.userId.size() > 0 && d.userId.size() <= 128
-
-        && d.title is string && d.title.size() > 0 && d.title.size() <= 200;
-
-    }
-
-
-
-    /// Platform or org leaders viewing institutional management data.
-    function canViewOrgManagement(orgId) {
-
-      return isSuperAdmin() || isOrgAdmin(orgId) || canManageGroups(orgId);
-
-    }
-
-
-
-    function canDeliverOrgInvite(orgId) {
-
-      return isOrgAdmin(orgId)
-
-        || (canManageGroups(orgId)
-
-          && request.resource.data.role in ['member', 'groupLeader']);
-
-    }
-
-
-
-    function canViewOrgInsights(orgId) {
-
-      return isSuperAdmin()
-
-        || (isOrgMember(orgId)
-
-          && orgMemberRole(orgId) in ['orgAdmin', 'groupLeader']);
-
-    }
-
-    function memberGroupIds(orgId) {
-      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.get('groupIds', []);
-    }
-
-    function canReadCalendarEvent(orgId) {
-      return isOrgAdmin(orgId)
-        || (
-          isOrgMember(orgId)
-          && resource.data.visibility == 'organization'
-        )
-        || (
-          isOrgMember(orgId)
-          && resource.data.visibility == 'groups'
-          && resource.data.groupIds is list
-          && resource.data.groupIds.hasAny(memberGroupIds(orgId))
-        );
-    }
-
-    function serviceProjectDoc(projectId) {
-      return get(/databases/$(database)/documents/serviceProjects/$(projectId));
-    }
-
-    function isServiceProjectApprover(p) {
-      return p.keys().hasAny(['approverUids'])
-        && p.approverUids is list
-        && request.auth.uid in p.approverUids;
-    }
-
-    function isAssignedServiceProjectAudience(p) {
-      return isOrgMember(p.orgId)
-        && (
-          p.assignmentType == 'organization'
-          || (
-            p.assignmentType == 'groups'
-            && p.assignedGroupIds is list
-            && memberGroupIds(p.orgId).hasAny(p.assignedGroupIds)
-          )
-        );
-    }
-
-    function isPublishedServiceProject(p) {
-      return p.status == 'active'
-        && p.get('proposalStatus', 'none') in ['none', 'approved'];
-    }
-
-    function isServiceProjectProposer(p) {
-      return p.keys().hasAny(['proposedByUid'])
-        && p.proposedByUid is string
-        && p.proposedByUid == request.auth.uid;
-    }
-
-    function memberProposalAssignmentAllowed(d) {
-      return d.assignmentType == 'organization'
-        || (
-          d.assignmentType == 'groups'
-          && d.assignedGroupIds is list
-          && d.assignedGroupIds.size() > 0
-          && memberGroupIds(d.orgId).hasAll(d.assignedGroupIds)
-        );
-    }
-
-    function canReadServiceProject() {
-      let p = resource.data;
-      return isSignedIn()
-        && p.orgId is string
-        && (
-          isSuperAdmin()
-          || isOrgAdmin(p.orgId)
-          || (
-            isPublishedServiceProject(p)
-            && (
-              isServiceProjectApprover(p)
-              || isAssignedServiceProjectAudience(p)
-            )
-          )
-          || isServiceProjectProposer(p)
-        );
-    }
-
-    // List rules are not filters. Own-proposal query constrains proposedByUid;
-    // org-scoped queries still use canReadServiceProject (orgId in the query).
-    function canListServiceProjects() {
-      return isSignedIn() && (
-        resource.data.proposedByUid == request.auth.uid
-        || canReadServiceProject()
-      );
-    }
-
-    function serviceProjectApproversValid(d) {
-      return d.mode == 'selfReported'
-        ? d.approverUids.size() == 0
-        : (
-          d.source == 'memberProposed'
-            && d.proposalStatus in ['submitted', 'rejected', 'returned']
-            ? d.approverUids.size() == 0
-            : d.approverUids.size() > 0
-        );
-    }
-
-    function isValidServiceProject() {
-      let d = request.resource.data;
-      return d.keys().hasOnly([
-          'orgId', 'title', 'description', 'scope', 'location',
-          'startDate', 'endDate', 'assignmentType', 'assignedGroupIds',
-          'mode', 'approverUids', 'status', 'createdBy', 'createdAt', 'updatedAt',
-          'source', 'proposedByUid', 'proposalStatus', 'proposalNote',
-          'rejectionReason', 'nominatedApproverUids'
-        ])
-        && d.keys().hasAll([
-          'orgId', 'title', 'description', 'assignmentType', 'assignedGroupIds',
-          'mode', 'approverUids', 'status', 'createdBy', 'createdAt', 'updatedAt',
-          'source', 'proposalStatus', 'nominatedApproverUids'
-        ])
-        && d.orgId is string && d.orgId.size() > 0 && d.orgId.size() <= 128
-        && exists(/databases/$(database)/documents/organizations/$(d.orgId))
-        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
-        && d.description is string && d.description.size() <= 4000
-        && (!d.keys().hasAny(['scope']) || (d.scope is string && d.scope.size() <= 200))
-        && (!d.keys().hasAny(['location']) || (d.location is string && d.location.size() <= 300))
-        && (!d.keys().hasAny(['startDate']) || d.startDate is timestamp)
-        && (!d.keys().hasAny(['endDate']) || d.endDate is timestamp)
-        && (
-          !d.keys().hasAny(['startDate'])
-          || !d.keys().hasAny(['endDate'])
-          || d.endDate >= d.startDate
-        )
-        && d.assignmentType in ['organization', 'groups']
-        && d.assignedGroupIds is list
-        && d.assignedGroupIds.size() <= 30
-        && (
-          d.assignmentType == 'organization'
-            ? d.assignedGroupIds.size() == 0
-            : d.assignedGroupIds.size() > 0
-        )
-        && d.mode in ['selfReported', 'requiresApproval']
-        && d.approverUids is list
-        && d.approverUids.size() <= 20
-        && serviceProjectApproversValid(d)
-        && d.status in ['active', 'inactive']
-        && d.source in ['admin', 'memberProposed']
-        && d.proposalStatus in ['none', 'submitted', 'approved', 'rejected', 'returned']
-        && (
-          d.source == 'admin'
-            ? (
-                d.proposalStatus == 'none'
-                && (!d.keys().hasAny(['proposedByUid']) || d.proposedByUid.size() == 0)
-              )
-            : (
-                d.proposalStatus in ['submitted', 'approved', 'rejected', 'returned']
-                && d.keys().hasAny(['proposedByUid'])
-                && d.proposedByUid is string
-                && d.proposedByUid.size() > 0
-                && d.proposedByUid.size() <= 128
-              )
-        )
-        && d.nominatedApproverUids is list
-        && d.nominatedApproverUids.size() <= 20
-        && (!d.keys().hasAny(['proposalNote']) || (d.proposalNote is string && d.proposalNote.size() <= 2000))
-        && (!d.keys().hasAny(['rejectionReason']) || (d.rejectionReason is string && d.rejectionReason.size() <= 2000))
-        && d.createdBy is string && d.createdBy.size() > 0 && d.createdBy.size() <= 128
+        && d.groupName is string && d.groupName.size() > 0 && d.groupName.size() <= 200
+        && d.inviteeUid is string && d.inviteeUid.size() > 0 && d.inviteeUid.size() <= 128
+        && d.inviteeEmail is string && d.inviteeEmail.size() <= 320
+        && d.invitedByUid == request.auth.uid
+        && d.status == 'pending'
         && d.createdAt is timestamp
-        && d.updatedAt is timestamp;
+        && (!('organizationName' in d) || (d.organizationName is string && d.organizationName.size() <= 300))
+        && (!('emailSubject' in d) || (d.emailSubject is string && d.emailSubject.size() <= 300))
+        && (!('emailText' in d) || (d.emailText is string && d.emailText.size() <= 20000));
     }
 
-    function isValidMemberProposalCreate() {
+    function isGroupPracticeDelivery(userId) {
       let d = request.resource.data;
-      return d.source == 'memberProposed'
-        && d.proposedByUid == request.auth.uid
-        && d.createdBy == request.auth.uid
-        && d.proposalStatus == 'submitted'
-        && d.status == 'inactive'
-        && d.approverUids.size() == 0
-        && isOrgMember(d.orgId)
-        && memberProposalAssignmentAllowed(d)
-        && (!d.keys().hasAny(['proposalNote']) || d.proposalNote.size() == 0)
-        && (!d.keys().hasAny(['rejectionReason']) || d.rejectionReason.size() == 0);
-    }
-
-    function isValidAdminProjectCreate() {
-      let d = request.resource.data;
-      return d.source == 'admin'
-        && d.proposalStatus == 'none'
-        && d.createdBy == request.auth.uid
-        && isOrgAdmin(d.orgId);
-    }
-
-    function isMemberProposalResubmit() {
-      let d = request.resource.data;
-      let p = resource.data;
-      return p.get('source', 'admin') == 'memberProposed'
-        && p.proposedByUid == request.auth.uid
-        && p.proposalStatus in ['rejected', 'returned']
-        && d.source == 'memberProposed'
-        && d.proposedByUid == p.proposedByUid
-        && d.status == 'inactive'
-        && d.proposalStatus == 'submitted'
-        && d.approverUids.size() == 0
-        && isOrgMember(d.orgId)
-        && memberProposalAssignmentAllowed(d);
-    }
-
-    function serviceProjectIdentityUnchanged() {
-      return request.resource.data.orgId == resource.data.orgId
-        && request.resource.data.createdBy == resource.data.createdBy
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.get('source', 'admin') == resource.data.get('source', 'admin')
-        && request.resource.data.get('proposedByUid', '') == resource.data.get('proposedByUid', '');
-    }
-
-    function timestampInServiceWindow(p, day) {
-      return day is timestamp
-        && (!p.keys().hasAny(['startDate']) || !(p.startDate is timestamp) || day >= p.startDate)
-        && (!p.keys().hasAny(['endDate']) || !(p.endDate is timestamp) || day <= p.endDate);
-    }
-
-    function isValidServiceHourEntryShape() {
-      let d = request.resource.data;
-      return d.keys().hasOnly([
-          'projectId', 'orgId', 'userId', 'date', 'hours', 'note', 'status',
-          'source', 'submittedAt', 'reviewedBy', 'reviewedAt', 'reviewNote',
-          'reflectionId'
-        ])
-        && d.keys().hasAll(['projectId', 'orgId', 'userId', 'date', 'hours', 'status', 'submittedAt'])
-        && d.projectId is string && d.projectId.size() > 0 && d.projectId.size() <= 128
-        && d.orgId is string && d.orgId.size() > 0 && d.orgId.size() <= 128
-        && d.userId is string && d.userId.size() > 0 && d.userId.size() <= 128
-        && d.date is timestamp
-        && d.hours is number && d.hours > 0 && d.hours <= 24
-        && d.status in ['logged', 'pending', 'approved', 'rejected']
-        && d.submittedAt is timestamp
-        && (!d.keys().hasAny(['source']) || d.source in ['admin', 'memberProposed'])
-        && (!d.keys().hasAny(['note']) || (d.note is string && d.note.size() <= 2000))
-        && (!d.keys().hasAny(['reviewedBy']) || (d.reviewedBy is string && d.reviewedBy.size() <= 128))
-        && (!d.keys().hasAny(['reviewedAt']) || d.reviewedAt is timestamp)
-        && (!d.keys().hasAny(['reviewNote']) || (d.reviewNote is string && d.reviewNote.size() <= 2000))
-        && (!d.keys().hasAny(['reflectionId']) || (d.reflectionId is string && d.reflectionId.size() <= 128))
-        && !d.keys().hasAny([
-          'reflection', 'reflectionText', 'reflectionBody', 'body', 'journal', 'privateNote'
-        ]);
-    }
-
-    function serviceHourIdentityUnchanged() {
-      return request.resource.data.projectId == resource.data.projectId
-        && request.resource.data.orgId == resource.data.orgId
-        && request.resource.data.userId == resource.data.userId
-        && request.resource.data.submittedAt == resource.data.submittedAt
-        && request.resource.data.get('source', 'admin') == resource.data.get('source', 'admin');
-    }
-
-    function memberMayLogAgainstProject(p) {
-      return isPublishedServiceProject(p)
-        && isAssignedServiceProjectAudience(p)
-        && timestampInServiceWindow(p, request.resource.data.date);
-    }
-
-    function isValidServiceHourCreate() {
-      let d = request.resource.data;
-      let p = serviceProjectDoc(d.projectId).data;
-      return exists(/databases/$(database)/documents/serviceProjects/$(d.projectId))
-        && d.orgId == p.orgId
-        && d.userId == request.auth.uid
-        && memberMayLogAgainstProject(p)
-        && d.get('source', 'admin') == p.get('source', 'admin')
-        && (
-          p.mode == 'selfReported'
-            ? d.status == 'logged'
-            : d.status == 'pending'
-        )
-        && !d.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote'])
-        && (!d.keys().hasAny(['reflectionId']) || d.reflectionId.size() == 0);
-    }
-
-    function isOwnerServiceHourUpdate() {
-      let d = request.resource.data;
-      let p = serviceProjectDoc(d.projectId).data;
-      return request.auth.uid == resource.data.userId
-        && serviceHourIdentityUnchanged()
-        && (
-          (
-            resource.data.status in ['logged', 'pending']
-            && memberMayLogAgainstProject(p)
-            && d.status == resource.data.status
-            && !d.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote'])
-          )
-          || request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['reflectionId'])
-        );
-    }
-
-    function isApproverServiceHourReview() {
-      let d = request.resource.data;
-      let p = serviceProjectDoc(resource.data.projectId).data;
-      return isServiceProjectApprover(p)
-        && request.auth.uid != resource.data.userId
-        && serviceHourIdentityUnchanged()
-        && d.date == resource.data.date
-        && d.hours == resource.data.hours
-        && d.get('note', '') == resource.data.get('note', '')
-        && d.get('reflectionId', '') == resource.data.get('reflectionId', '')
-        && resource.data.status in ['pending', 'logged']
-        && d.status in ['approved', 'rejected']
-        && d.reviewedBy == request.auth.uid
-        && d.reviewedAt is timestamp;
-    }
-
-    function canReadServiceHourEntry() {
-      let d = resource.data;
-      return isSignedIn()
-        && d.userId is string
-        && d.orgId is string
-        && d.projectId is string
-        && (
-          d.userId == request.auth.uid
-          || isSuperAdmin()
-          || isOrgAdmin(d.orgId)
-          || (
-            exists(/databases/$(database)/documents/serviceProjects/$(d.projectId))
-            && isServiceProjectApprover(serviceProjectDoc(d.projectId).data)
-          )
-        );
-    }
-
-    function isValidCalendarEvent(orgId) {
-      let d = request.resource.data;
-      return d.keys().hasOnly([
-          'organizationId', 'title', 'description', 'location', 'category',
-          'allDay', 'startAt', 'endAt', 'visibility', 'groupIds',
-          'createdByUid', 'createdAt', 'updatedAt'
-        ])
-        && d.keys().hasAll([
-          'organizationId', 'title', 'description', 'location', 'category',
-          'allDay', 'startAt', 'endAt', 'visibility', 'groupIds',
-          'createdByUid', 'createdAt', 'updatedAt'
-        ])
+      return d.source == 'groupSchedule'
         && d.organizationId is string
-        && d.organizationId == orgId
-        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
-        && d.description is string && d.description.size() <= 4000
-        && d.location is string && d.location.size() <= 300
-        && d.category in ['liturgy', 'academics', 'athletics', 'ministry', 'other']
-        && d.allDay is bool
-        && d.startAt is timestamp
-        && d.endAt is timestamp
-        && d.endAt > d.startAt
-        && d.visibility in ['organization', 'groups']
-        && d.groupIds is list
-        && d.groupIds.size() <= 30
-        && d.createdByUid is string
-        && d.createdAt is timestamp
+        && d.organizationId.size() > 0
+        && d.organizationId.size() <= 128
+        && d.groupId is string
+        && d.groupId.size() > 0
+        && d.groupId.size() <= 128
+        && d.groupScheduleId is string
+        && d.groupScheduleId.size() > 0
+        && d.groupScheduleId.size() <= 128
+        && d.title is string
+        && d.title.size() > 0
+        && d.title.size() <= 500
+        && memberHasGroup(d.organizationId, userId, d.groupId)
         && (
-          d.visibility == 'organization'
-            ? d.groupIds.size() == 0
-            : d.groupIds.size() > 0
+          isVerifiedPlatformAdmin()
+          || isOrgAdmin(d.organizationId)
+          || canManageOrgGroups(d.organizationId)
         );
     }
-
-    function calendarEventIdentityUnchanged() {
-      return request.resource.data.organizationId == resource.data.organizationId
-        && request.resource.data.createdByUid == resource.data.createdByUid
-        && request.resource.data.createdAt == resource.data.createdAt;
-    }
-
-    function isValidCalendarSchedule(orgId) {
-      let d = request.resource.data;
-      return d.keys().hasOnly([
-          'organizationId', 'visibility', 'groupIds', 'rows',
-          'createdByUid', 'createdAt', 'updatedByUid', 'updatedAt'
-        ])
-        && d.keys().hasAll([
-          'organizationId', 'visibility', 'groupIds', 'rows',
-          'createdByUid', 'createdAt', 'updatedByUid', 'updatedAt'
-        ])
-        && d.organizationId is string
-        && d.organizationId == orgId
-        && d.visibility in ['organization', 'groups']
-        && d.groupIds is list
-        && d.groupIds.size() <= 30
-        && d.rows is list
-        && d.rows.size() <= 80
-        && d.createdByUid is string
-        && d.createdAt is timestamp
-        && d.updatedByUid is string
-        && d.updatedByUid == request.auth.uid
-        && (
-          d.visibility == 'organization'
-            ? d.groupIds.size() == 0
-            : d.groupIds.size() > 0
-        );
-    }
-
-    function hasPendingOrgInvite(orgId) {
-
-      return isSignedIn()
-
-        && request.auth.token.email != null
-
-        && exists(/databases/$(database)/documents/pendingOrgJoinsByEmail/$(normalizedAuthEmail())/orgs/$(orgId));
-
-    }
-
-
-
-    function isBootstrapOrgAdmin(orgId, memberId) {
-
-      return isSignedIn()
-
-        && request.auth.uid == memberId
-
-        && request.resource.data.role == 'orgAdmin'
-
-        && get(/databases/$(database)/documents/organizations/$(orgId)).data.createdByUid == request.auth.uid;
-
-    }
-
-
-
-    function memberSelfGroupIdsUpdate(orgId, memberId) {
-
-      return isSignedIn()
-
-        && request.auth.uid == memberId
-
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['groupIds']);
-
-    }
-
-
-
-    function isGroupMember(orgId, groupId) {
-
-      return isSignedIn()
-
-        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid))
-
-        && get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.keys().hasAny(['groupIds'])
-
-        && groupId in get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.groupIds;
-
-    }
-
-
-
-    /// Org admin: all groups. Group leader: only groups listed on their membership.
-    function canManageGroupGifts(orgId, groupId) {
-
-      return isOrgAdmin(orgId)
-
-        || (
-
-          isOrgMember(orgId)
-
-          && orgMemberRole(orgId) == 'groupLeader'
-
-          && isGroupMember(orgId, groupId)
-
-        );
-
-    }
-
-
 
     function canDeliverGroupGiftCopy(userId) {
-
       let d = request.resource.data;
-
       return isValidGroupGiftCopy()
-
         && d.userId == userId
-
         && canManageGroupGifts(d.organizationId, d.groupId)
-
-        && exists(/databases/$(database)/documents/organizations/$(d.organizationId)/members/$(userId))
-
-        && get(/databases/$(database)/documents/organizations/$(d.organizationId)/members/$(userId)).data.keys().hasAny(['groupIds'])
-
-        && d.groupId in get(/databases/$(database)/documents/organizations/$(d.organizationId)/members/$(userId)).data.groupIds;
-
+        && memberHasGroup(d.organizationId, userId, d.groupId);
     }
 
-
-
-    function canShareToGroup(orgId, groupId) {
-
-      return isSuperAdmin() || isGroupMember(orgId, groupId);
-
+    function isPublishedSaint() {
+      return resource.data.get('published', false) == true
+        || resource.data.get('status', '') == 'published';
     }
 
-
-
-    // App configuration readable by all clients (TTS voice hints, etc.).
-    match /config/{docId} {
-      allow read: if true;
-      allow write: if isSuperAdmin();
+    match /saints/{slug} {
+      allow read: if isPublishedSaint() || isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
+    match /users/{uid} {
+      allow read, write: if isUser(uid);
 
-
-    match /shares/{shareId} {
-
-      allow read: if true;
-
-      allow create: if isSignedIn();
-
-      allow update, delete: if isSignedIn()
-
-        && request.auth.uid == resource.data.createdByUid;
-
-    }
-
-
-
-    // Personal spiritual data — owner only. Admins never receive cross-user access.
-    // Recursive read covers Sharing My Gifts (`users/{uid}/gifts`) and other
-    // owner subcollections. Nested matches below add group-gift write exceptions.
-    match /users/{userId}/{document=**} {
-      allow read: if isSignedIn() && request.auth.uid == userId;
-    }
-
-    match /users/{userId} {
-
-      allow read, write: if isSignedIn() && request.auth.uid == userId;
-
-
-
-      match /orgMemberships/{orgId} {
-
-        allow read: if isSignedIn() && request.auth.uid == userId;
-
-        allow create: if isSignedIn() && request.auth.uid == userId && (
-
-          request.resource.data.role == 'member'
-
-          || hasPendingOrgInvite(orgId)
-
-          || isBootstrapOrgAdmin(orgId, userId)
-
-        );
-
-        allow update: if isSignedIn() && (
-
-          isOrgAdmin(orgId)
-
-          || (
-
-            request.auth.uid == userId
-
-            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
-
-          )
-
-        );
-
-        allow delete: if isSignedIn() && (
-
-          request.auth.uid == userId
-
-          || isOrgAdmin(orgId)
-
-        );
-
+      // Ask WWJD counters — Cloud Functions only (Admin SDK).
+      match /chatQuota/{document=**} {
+        allow read: if isUser(uid);
+        allow write: if false;
       }
 
-
-
-      match /pendingGroupInvites/{inviteId} {
-
-        allow read: if isSignedIn() && request.auth.uid == userId;
-
-        allow create: if isSignedIn() && (
-          canInviteToGroup(request.resource.data.organizationId)
-          || (
-            request.auth.uid == userId
-            && request.resource.data.status == 'pending'
-            && exists(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)/groupInvites/$(inviteId))
-            && (
-              get(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)/groupInvites/$(inviteId)).data.inviteeUid == request.auth.uid
-              || (
-                request.auth.token.email != null
-                && get(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)/groupInvites/$(inviteId)).data.inviteeEmail == normalizedAuthEmail()
-              )
-            )
-            && get(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)/groupInvites/$(inviteId)).data.status == 'pending'
-          )
-        );
-
-        allow update: if isSignedIn() && request.auth.uid == userId;
-
-        allow delete: if isSignedIn() && (
-
-          request.auth.uid == userId
-
-          || canManageGroups(resource.data.organizationId)
-
-        );
-
+      // Member copies of a group Gift. The owner already writes their own gifts.
+      // A group manager may write only a groupGift copy for an accepted member.
+      match /gifts/{giftId} {
+        allow create, update: if canDeliverGroupGiftCopy(uid);
+        allow update, delete: if resource.data.get('source', '') == 'groupGift'
+          && canManageGroupGifts(
+            resource.data.organizationId,
+            resource.data.groupId
+          );
       }
 
-
+      // Membership indexes only. Not chat, reflections, history, or personal gifts.
+      match /orgMemberships/{membershipOrgId} {
+        allow create, update: if (isVerifiedPlatformAdmin() || isOrgAdmin(membershipOrgId))
+          && request.resource.data.organizationId == membershipOrgId
+          && request.resource.data.role in ['member', 'groupLeader', 'orgAdmin']
+          && request.resource.data.joinedAt is timestamp;
+        allow delete: if isVerifiedPlatformAdmin() || isOrgAdmin(membershipOrgId);
+      }
 
       match /groupMemberships/{groupId} {
-
-        allow read: if isSignedIn() && request.auth.uid == userId;
-
-        allow create, update: if isSignedIn() && request.auth.uid == userId;
-
-        allow delete: if isSignedIn() && (
-
-          request.auth.uid == userId
-
-          || canManageGroups(resource.data.organizationId)
-
-        );
-
+        allow create, update: if request.resource.data.organizationId is string
+          && request.resource.data.groupId == groupId
+          && request.resource.data.keys().hasAll(['organizationId', 'groupId'])
+          && (isVerifiedPlatformAdmin() || isOrgAdmin(request.resource.data.organizationId));
+        allow delete: if resource.data.organizationId is string
+          && (isVerifiedPlatformAdmin() || isOrgAdmin(resource.data.organizationId));
       }
 
-
-
+      // Group schedule copies. The owner reads their own. A group manager may
+      // write only a groupSchedule copy for someone already in that group.
       match /groupPractices/{practiceId} {
-
-        allow read: if isSignedIn() && request.auth.uid == userId;
-
-        allow create: if isSignedIn() && (
-
-          request.auth.uid == userId
-
-          || isOrgAdmin(request.resource.data.organizationId)
-
-        );
-
-        allow update: if isSignedIn() && request.auth.uid == userId;
-
-        allow delete: if isSignedIn() && (
-
-          request.auth.uid == userId
-
-          || isOrgAdmin(resource.data.organizationId)
-
-        );
-
-      }
-
-
-
-      match /gifts/{giftId} {
-
-        allow read: if isSignedIn() && request.auth.uid == userId;
-
-        allow create: if isSignedIn() && (
-
-          request.auth.uid == userId
-
-          || canDeliverGroupGiftCopy(userId)
-
-        );
-
-        allow update: if isSignedIn() && (
-
-          request.auth.uid == userId
-
-          || (
-
-            resource.data.source == 'groupGift'
-
-            && canManageGroupGifts(resource.data.organizationId, resource.data.groupId)
-
+        allow create: if isGroupPracticeDelivery(uid);
+        allow update: if resource.data.get('source', '') == 'groupSchedule'
+          && request.resource.data.organizationId == resource.data.organizationId
+          && request.resource.data.groupId == resource.data.groupId
+          && memberHasGroup(
+            resource.data.organizationId,
+            uid,
+            resource.data.groupId
           )
-
-          || canDeliverGroupGiftCopy(userId)
-
-        );
-
-        allow delete: if isSignedIn() && (
-
-          request.auth.uid == userId
-
-          || (
-
-            resource.data.source == 'groupGift'
-
-            && canManageGroupGifts(resource.data.organizationId, resource.data.groupId)
-
-          )
-
-        );
-
-      }
-
-
-
-      match /reflections/{threadId} {
-        allow read, write: if isSignedIn() && request.auth.uid == userId;
-        match /entries/{entryId} {
-          allow read, write: if isSignedIn() && request.auth.uid == userId;
-        }
-      }
-
-      match /{document=**} {
-
-        allow read, write: if isSignedIn() && request.auth.uid == userId;
-
-      }
-
-    }
-
-
-
-    match /platformAdmins/{adminId} {
-
-      allow read: if isSignedIn() && request.auth.uid == adminId;
-
-      allow create: if isSignedIn()
-
-        && request.auth.uid == adminId
-
-        && (isFoundationAdmin() || request.resource.data.role == 'superAdmin');
-
-      allow update, delete: if false;
-
-    }
-
-
-
-    match /walkTogether/{journeyId} {
-
-      allow read: if isSignedIn();
-
-      allow create: if isSignedIn()
-
-        && request.resource.data.createdByUid == request.auth.uid;
-
-      allow update: if isSignedIn();
-
-      allow delete: if isSignedIn()
-
-        && request.auth.uid == resource.data.createdByUid;
-
-    }
-
-
-
-    match /organizations/{orgId} {
-
-      allow read: if isOrgMember(orgId) || isOrganizationCreator(orgId) || isSuperAdmin();
-
-      allow create: if isSignedIn()
-
-        && request.resource.data.createdByUid == request.auth.uid;
-
-      allow update: if isOrgAdmin(orgId);
-
-      allow delete: if isOrgAdmin(orgId);
-
-
-
-      match /groups/{groupId} {
-
-        allow read: if isOrgMember(orgId) || isOrganizationCreator(orgId) || isSuperAdmin();
-
-        allow create, update, delete: if canManageGroups(orgId);
-
-
-
-        match /shares/{shareId} {
-
-          allow read: if isSuperAdmin()
-
-            || isGroupMember(orgId, groupId)
-
-            || canManageGroups(orgId);
-
-          allow create: if isSignedIn()
-
-            && request.resource.data.createdByUid == request.auth.uid
-
-            && request.resource.data.groupId == groupId
-
-            && request.resource.data.organizationId == orgId
-
-            && canShareToGroup(orgId, groupId);
-
-          allow update: if false;
-
-          allow delete: if isSignedIn() && (
-
-            resource.data.createdByUid == request.auth.uid
-
-            || canManageGroups(orgId)
-
-          );
-
-        }
-
-
-
-        match /schedules/{scheduleId} {
-
-          allow read: if isSuperAdmin()
-
-            || isGroupMember(orgId, groupId)
-
-            || canManageGroups(orgId);
-
-          allow create: if isOrgAdmin(orgId)
-
-            && request.resource.data.organizationId == orgId
-
-            && request.resource.data.groupId == groupId
-
-            && request.resource.data.createdByUid == request.auth.uid;
-
-          allow update: if isOrgAdmin(orgId);
-
-          allow delete: if isOrgAdmin(orgId);
-
-        }
-
-
-
-        match /gifts/{giftId} {
-
-          allow read: if isSuperAdmin()
-
-            || isGroupMember(orgId, groupId)
-
-            || canManageGroups(orgId);
-
-          allow create: if canManageGroupGifts(orgId, groupId)
-
-            && isValidGroupGiftDef(orgId, groupId)
-
-            && request.resource.data.createdByUid == request.auth.uid
-
-            && request.resource.data.organizationId == orgId
-
-            && request.resource.data.groupId == groupId;
-
-          allow update: if canManageGroupGifts(orgId, groupId)
-
-            && isValidGroupGiftDef(orgId, groupId)
-
-            && request.resource.data.createdByUid == resource.data.createdByUid
-
-            && request.resource.data.organizationId == resource.data.organizationId
-
-            && request.resource.data.groupId == resource.data.groupId;
-
-          allow delete: if isOrgAdmin(orgId);
-
-        }
-
-      }
-
-
-
-      match /members/{memberId} {
-
-        allow read: if isOrgMember(orgId)
-
-          || isOrganizationCreator(orgId)
-
-          || isSuperAdmin()
-
-          || (isSignedIn() && request.auth.uid == memberId);
-
-        allow create: if isSignedIn() && (
-
-          isOrgAdmin(orgId)
-
-          || isBootstrapOrgAdmin(orgId, memberId)
-
-          || (request.auth.uid == memberId && hasPendingOrgInvite(orgId))
-
-        );
-
-        allow update: if isOrgAdmin(orgId) || memberSelfGroupIdsUpdate(orgId, memberId);
-
-        allow delete: if isOrgAdmin(orgId);
-
-      }
-
-
-
-      match /invites/{inviteId} {
-
-        allow read: if canViewOrgManagement(orgId);
-
-        allow create: if canDeliverOrgInvite(orgId);
-
-        allow update: if canDeliverOrgInvite(orgId)
-          || isValidOrgInviteeResponse();
-
-        allow delete: if isOrgAdmin(orgId);
-
-      }
-
-
-
-      match /emailDeliveryLogs/{logId} {
-
-        allow read: if canViewOrgManagement(orgId);
-
-        allow write: if false;
-
-      }
-
-
-
-      match /groupInvites/{inviteId} {
-
-        allow read: if isSuperAdmin()
-          || canInviteToGroup(orgId)
-          || (isSignedIn() && resource.data.inviteeUid == request.auth.uid)
-          || (isSignedIn()
-            && request.auth.token.email != null
-            && resource.data.inviteeEmail == normalizedAuthEmail());
-
-        allow create: if canInviteToGroup(orgId)
-
-          && request.resource.data.status == 'pending'
-
-          && request.resource.data.invitedByUid == request.auth.uid
-
-          && request.resource.data.organizationId == orgId;
-
-        allow update: if (
-          isSignedIn()
-          && resource.data.status == 'pending'
-          && request.resource.data.status in ['accepted', 'rejected']
           && (
-            resource.data.inviteeUid == request.auth.uid
-            || (
-              request.auth.token.email != null
-              && resource.data.inviteeEmail == normalizedAuthEmail()
-            )
-          )
-        ) || (
-
-          canManageGroups(orgId)
-
-          && request.resource.data.status == 'rejected'
-
-        );
-
-        allow delete: if canManageGroups(orgId);
-
+            isVerifiedPlatformAdmin()
+            || isOrgAdmin(resource.data.organizationId)
+            || canManageOrgGroups(resource.data.organizationId)
+          );
       }
 
-      match /calendarEvents/{eventId} {
-        allow read: if canReadCalendarEvent(orgId);
-
-        allow create: if isOrgAdmin(orgId)
-          && isValidCalendarEvent(orgId)
-          && request.resource.data.createdByUid == request.auth.uid;
-
-        allow update: if isOrgAdmin(orgId)
-          && isValidCalendarEvent(orgId)
-          && calendarEventIdentityUnchanged();
-
-        allow delete: if isOrgAdmin(orgId);
+      match /pendingGroupInvites/{inviteId} {
+        allow create: if request.resource.data.status == 'pending'
+          && request.resource.data.organizationId is string
+          && request.resource.data.groupId is string
+          && request.resource.data.createdAt is timestamp
+          && canManageOrgGroups(request.resource.data.organizationId);
       }
 
-      match /calendarSchedules/{scheduleId} {
-        allow read: if canReadCalendarEvent(orgId);
-
-        allow create: if isOrgAdmin(orgId)
-          && scheduleId == 'default'
-          && isValidCalendarSchedule(orgId)
-          && request.resource.data.createdByUid == request.auth.uid;
-
-        allow update: if isOrgAdmin(orgId)
-          && scheduleId == 'default'
-          && isValidCalendarSchedule(orgId)
-          && calendarEventIdentityUnchanged();
-
-        allow delete: if isOrgAdmin(orgId) && scheduleId == 'default';
+      match /{subcollection}/{document=**} {
+        allow read, write: if isUser(uid) && subcollection != 'chatQuota';
       }
-
     }
 
-
-
-    match /emailInvites/{emailKey}/items/{inviteId} {
-
-      allow read: if isSignedIn() && normalizedAuthEmail() == emailKey;
-
-      allow create: if isSignedIn()
-
-        && canDeliverOrgInvite(request.resource.data.organizationId);
-
-      allow update: if isSignedIn() && (
-        isValidOrgInviteeResponse()
-        || canDeliverOrgInvite(resource.data.organizationId)
-      );
-
-      allow delete: if isSignedIn() && (
-        isOrgAdmin(resource.data.organizationId)
-        || canManageGroups(resource.data.organizationId)
-      );
-
+    match /shares/{shareId} {
+      allow read: if true;
+      allow create: if signedIn();
+      allow update, delete: if signedIn()
+        && request.auth.uid == resource.data.get('createdByUid', '');
     }
 
-
-
-    match /pendingOrgJoinsByEmail/{emailKey}/orgs/{orgId} {
-
-      allow read: if isSignedIn() && normalizedAuthEmail() == emailKey;
-
-      allow create: if isSignedIn() && canDeliverOrgInvite(orgId);
-
-      allow update: if isSignedIn() && canDeliverOrgInvite(orgId);
-
-      allow delete: if isSignedIn() && (
-
-        normalizedAuthEmail() == emailKey || isOrgAdmin(orgId)
-
-      );
-
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
-
-
-    match /platformEmailLogs/{logId} {
-
-      allow read: if isSuperAdmin();
-
-      allow write: if false;
-
-    }
-
-
-
-    match /insightsRecords/{recordId} {
-
-      allow read: if isSignedIn()
-
-        && (isSuperAdmin() || canViewOrgInsights(resource.data.organizationId));
-
-      allow write: if false;
-
-    }
-
-
-
-    match /{path=**}/groupInvites/{inviteId} {
-
-      allow read: if isSignedIn() && (
-        isSuperAdmin()
-        || resource.data.inviteeUid == request.auth.uid
-        || (
-          request.auth.token.email != null
-          && resource.data.inviteeEmail == normalizedAuthEmail()
-        )
-        || canInviteToGroup(resource.data.organizationId)
-      );
-
-    }
-
-
-
-    match /{path=**}/invites/{inviteId} {
-
-      allow read: if isSignedIn() && (
-        isSuperAdmin()
-        || canViewOrgManagement(resource.data.organizationId)
-        || (
-          request.auth.token.email != null
-          && resource.data.email is string
-          && resource.data.email.lower() == normalizedAuthEmail()
-        )
-      );
-
-    }
-
-
-
-
-
-
-    match /serviceProjects/{projectId} {
-      allow get: if canReadServiceProject();
-      allow list: if canListServiceProjects();
-      allow create: if isSignedIn()
-        && isValidServiceProject()
-        && (isValidAdminProjectCreate() || isValidMemberProposalCreate());
-      allow update: if isSignedIn()
-        && isValidServiceProject()
-        && serviceProjectIdentityUnchanged()
-        && (isOrgAdmin(resource.data.orgId) || isMemberProposalResubmit());
-      allow delete: if isSignedIn() && isOrgAdmin(resource.data.orgId);
-    }
-
-    match /serviceHourEntries/{entryId} {
-      allow read: if canReadServiceHourEntry();
-      allow create: if isSignedIn()
-        && isValidServiceHourEntryShape()
-        && isValidServiceHourCreate();
-      allow update: if isSignedIn()
-        && isValidServiceHourEntryShape()
-        && (isOwnerServiceHourUpdate() || isApproverServiceHourReview());
-      allow delete: if isSignedIn() && (
-        (
-          request.auth.uid == resource.data.userId
-          && resource.data.status in ['logged', 'pending']
-        )
-        || isOrgAdmin(resource.data.orgId)
-      );
-    }
-
-    // Aggregate platform usage — counters only, no spiritual content.
-    // Writers: any signed-in user (including guests). Readers: Super Admin only.
     match /platformUsage/daily/days/{dayId} {
-      allow read: if isSuperAdmin();
-      allow create, update: if isSignedIn();
+      allow read: if isAdmin();
+      allow create, update: if signedIn();
     }
 
     match /platformUsage/meta/docs/{docId} {
-      allow read: if isSuperAdmin();
-      allow create, update: if isSignedIn() && docId == 'tracking';
+      allow read: if isAdmin();
+      allow create, update: if signedIn() && docId == 'tracking';
     }
 
+    // List queries (orderBy) need allow read, not allow get.
+    // Platform admin: every org, group, member list, and group gift.
+    // Org admin / group leader: only that organization.
+    // Accepted member: get their group, and read gifts for a group in groupIds.
+    match /organizations/{orgId} {
+      allow read: if isVerifiedPlatformAdmin();
+      allow get: if isOrgAdmin(orgId) || isGroupLeader(orgId) || hasOrgMembership(orgId);
+
+      match /groups/{groupId} {
+        allow read: if isVerifiedPlatformAdmin() || isOrgAdmin(orgId) || isGroupLeader(orgId);
+        allow get: if isGroupMember(orgId, groupId);
+
+        match /gifts/{giftId} {
+          allow read: if isVerifiedPlatformAdmin()
+            || isOrgAdmin(orgId)
+            || isGroupMember(orgId, groupId);
+          allow create: if canManageGroupGifts(orgId, groupId)
+            && isValidGroupGiftDef(orgId, groupId)
+            && request.resource.data.createdByUid == request.auth.uid;
+          allow update: if canManageGroupGifts(orgId, groupId)
+            && isValidGroupGiftDef(orgId, groupId)
+            && request.resource.data.createdByUid == resource.data.createdByUid
+            && request.resource.data.organizationId == resource.data.organizationId
+            && request.resource.data.groupId == resource.data.groupId;
+          allow delete: if canManageGroupGifts(orgId, groupId);
+        }
+
+        match /schedules/{scheduleId} {
+          allow read: if isVerifiedPlatformAdmin()
+            || isOrgAdmin(orgId)
+            || isGroupMember(orgId, groupId);
+        }
+      }
+
+      match /members/{memberId} {
+        allow read: if isVerifiedPlatformAdmin() || isOrgAdmin(orgId) || isGroupLeader(orgId);
+        allow get: if signedIn() && request.auth.uid == memberId;
+        allow create: if isValidMember(orgId)
+          && (
+            isVerifiedPlatformAdmin()
+            || isOrgAdmin(orgId)
+            || (isUser(memberId) && hasPendingOrgJoin(orgId))
+          );
+        allow update: if isValidMember(orgId)
+          && (
+            isVerifiedPlatformAdmin()
+            || isOrgAdmin(orgId)
+            || (
+              isUser(memberId)
+              && request.resource.data.role == resource.data.role
+              && request.resource.data.organizationId == resource.data.organizationId
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['groupIds'])
+            )
+          );
+      }
+
+      match /invites/{inviteId} {
+        allow read: if isVerifiedPlatformAdmin() || isOrgAdmin(orgId) || isGroupLeader(orgId);
+        allow get: if inviteEmailMatchesAuth();
+        allow create, update: if canDeliverOrgInvite(orgId) && isValidOrgInvite(orgId);
+        allow update: if isValidOrgInviteeResponse() && isValidOrgInvite(orgId);
+      }
+
+      match /groupInvites/{inviteId} {
+        allow read: if isVerifiedPlatformAdmin() || isOrgAdmin(orgId) || isGroupLeader(orgId);
+        allow get: if signedIn() && (
+          resource.data.inviteeUid == request.auth.uid
+          || (
+            request.auth.token.email is string
+            && resource.data.inviteeEmail is string
+            && resource.data.inviteeEmail.lower() == request.auth.token.email.lower()
+          )
+        );
+        allow create: if canManageOrgGroups(orgId) && isValidGroupInviteCreate(orgId);
+        allow update: if signedIn()
+          && resource.data.status == 'pending'
+          && request.resource.data.status in ['accepted', 'rejected']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
+          && (
+            resource.data.inviteeUid == request.auth.uid
+            || (
+              request.auth.token.email is string
+              && resource.data.inviteeEmail is string
+              && resource.data.inviteeEmail.lower() == request.auth.token.email.lower()
+            )
+          );
+      }
+    }
+
+    match /emailInvites/{emailKey}/items/{inviteId} {
+      allow read: if signedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower() == emailKey;
+      allow create, update: if request.resource.data.email is string
+        && request.resource.data.email.lower() == emailKey
+        && request.resource.data.organizationId is string
+        && canDeliverOrgInvite(request.resource.data.organizationId)
+        && isValidOrgInvite(request.resource.data.organizationId);
+      allow update: if isValidOrgInviteeResponse()
+        && isValidOrgInvite(resource.data.organizationId);
+      allow delete: if resource.data.organizationId is string
+        && (isVerifiedPlatformAdmin() || isOrgAdmin(resource.data.organizationId));
+    }
+
+    match /pendingOrgJoinsByEmail/{emailKey}/orgs/{orgId} {
+      allow read: if signedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower() == emailKey;
+      allow create, update: if request.resource.data.email is string
+        && request.resource.data.email.lower() == emailKey
+        && canDeliverOrgInvite(orgId)
+        && isValidOrgInvite(orgId);
+      allow delete: if signedIn() && (
+        (request.auth.token.email is string && request.auth.token.email.lower() == emailKey)
+        || isVerifiedPlatformAdmin()
+        || isOrgAdmin(orgId)
+      );
+    }
   }
 }

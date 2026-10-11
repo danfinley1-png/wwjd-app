@@ -7,8 +7,10 @@ import '../models/ministry_group.dart';
 import '../models/organization.dart';
 import '../providers/admin_providers.dart';
 import '../services/group_gift_service.dart';
+import '../widgets/admin_rules_debug.dart';
 import '../utils/group_gift_share_access.dart';
 import 'create_group_gift_screen.dart';
+import 'org_gifts_screen.dart';
 
 /// Lists group-owned My Gifts for a ministry group (org admin / group leader).
 class GroupGiftsScreen extends ConsumerWidget {
@@ -89,6 +91,55 @@ class GroupGiftsScreen extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(_shareResultMessage(result))),
       );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteGift(
+    BuildContext context,
+    WidgetRef ref,
+    GroupGift gift,
+  ) async {
+    final isOverall = ref.read(isSuperAdminProvider).valueOrNull ?? false;
+    final scope = await showAdminGiftDeleteDialog(
+      context,
+      title: gift.title,
+      groupName: group.name,
+      organizationName: organizationName,
+      allowOrganization: isOverall,
+    );
+    if (scope == null || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final service = ref.read(groupGiftServiceProvider);
+      if (scope == AdminGiftDeleteScope.organization) {
+        final count = await service.deleteGiftAcrossOrganization(
+          orgId: orgId,
+          gift: gift,
+        );
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Deleted “${gift.title}” from $count group'
+              '${count == 1 ? '' : 's'}.',
+            ),
+          ),
+        );
+      } else {
+        await service.deleteGift(
+          orgId: orgId,
+          groupId: group.id,
+          giftId: gift.id,
+        );
+        messenger.showSnackBar(
+          SnackBar(content: Text('Deleted “${gift.title}”.')),
+        );
+      }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -182,75 +233,200 @@ class GroupGiftsScreen extends ConsumerWidget {
             );
           }
 
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: gifts.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              final gift = gifts[index];
-              return Card(
-                child: ListTile(
-                  leading: GroupBrandMark(
-                    groupName: group.name,
-                    logoUrl: Organization.resolveLogoUrl(
-                      organizationLogoUrl: orgLogo,
-                      fallback: gift.logoUrl,
-                    ),
-                    orgId: orgId,
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (gifts.length > 1)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Text(
+                    'Drag the handle to reorder. Accepted members see this order.',
+                    style: TextStyle(color: Colors.grey.shade700, height: 1.4),
                   ),
-                  title: Text(gift.title),
-                  subtitle: Text(
-                    [
-                      gift.frequency,
-                      gift.active ? 'Active' : 'Inactive',
-                      if (gift.specificTime != null &&
-                          gift.specificTime!.isNotEmpty)
-                        gift.specificTime!,
-                    ].join(' · '),
-                  ),
-                  trailing: FittedBox(
-                    child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: 'Share to other groups',
-                        icon: const Icon(Icons.share_outlined),
-                        onPressed: () => _shareGift(context, ref, gift),
-                      ),
-                      Switch(
-                        value: gift.active,
-                        onChanged: (on) async {
-                          try {
-                            await ref.read(groupGiftServiceProvider).setActive(
-                                  gift: gift,
-                                  active: on,
-                                );
-                          } catch (e) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('$e')),
-                              );
-                            }
-                          }
-                        },
-                      ),
-                    ],
-                    ),
-                  ),
-                  onTap: () => _openCreate(context, existing: gift),
                 ),
-              );
-            },
+              Expanded(
+                child: _ReorderableGroupGifts(
+                  gifts: gifts,
+                  group: group,
+                  orgId: orgId,
+                  orgLogo: orgLogo,
+                  onOpen: (gift) => _openCreate(context, existing: gift),
+                  onShare: (gift) => _shareGift(context, ref, gift),
+                  onActive: (gift, on) async {
+                    try {
+                      await ref.read(groupGiftServiceProvider).setActive(
+                            gift: gift,
+                            active: on,
+                          );
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('$e')),
+                        );
+                      }
+                    }
+                  },
+                  onReorder: (orderedIds) {
+                    return ref.read(groupGiftServiceProvider).reorderGifts(
+                          orgId: orgId,
+                          groupId: group.id,
+                          orderedIds: orderedIds,
+                        );
+                  },
+                  onDelete: (gift) => _confirmDeleteGift(context, ref, gift),
+                ),
+              ),
+            ],
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('$e')),
+        error: (e, _) => AdminRulesDebugText(
+          message: 'Could not load group gifts:\n$e',
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openCreate(context),
         icon: const Icon(Icons.add),
         label: const Text('Create group Gift'),
       ),
+    );
+  }
+}
+
+class _ReorderableGroupGifts extends StatefulWidget {
+  const _ReorderableGroupGifts({
+    required this.gifts,
+    required this.group,
+    required this.orgId,
+    required this.orgLogo,
+    required this.onOpen,
+    required this.onShare,
+    required this.onActive,
+    required this.onReorder,
+    required this.onDelete,
+  });
+
+  final List<GroupGift> gifts;
+  final MinistryGroup group;
+  final String orgId;
+  final String? orgLogo;
+  final void Function(GroupGift gift) onOpen;
+  final void Function(GroupGift gift) onShare;
+  final Future<void> Function(GroupGift gift, bool active) onActive;
+  final Future<void> Function(List<String> orderedIds) onReorder;
+  final void Function(GroupGift gift) onDelete;
+
+  @override
+  State<_ReorderableGroupGifts> createState() => _ReorderableGroupGiftsState();
+}
+
+class _ReorderableGroupGiftsState extends State<_ReorderableGroupGifts> {
+  List<GroupGift>? _pending;
+
+  @override
+  void didUpdateWidget(covariant _ReorderableGroupGifts oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final pending = _pending;
+    if (pending == null) return;
+    final incoming = widget.gifts.map((gift) => gift.id).join(',');
+    final local = pending.map((gift) => gift.id).join(',');
+    if (incoming == local) _pending = null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gifts = _pending ?? widget.gifts;
+    return ReorderableListView.builder(
+      padding: const EdgeInsets.all(16),
+      buildDefaultDragHandles: false,
+      itemCount: gifts.length,
+      onReorderItem: (oldIndex, newIndex) async {
+        if (oldIndex == newIndex) return;
+        final next = [...gifts];
+        final moved = next.removeAt(oldIndex);
+        next.insert(newIndex, moved);
+        final messenger = ScaffoldMessenger.of(context);
+        setState(() => _pending = next);
+        try {
+          await widget.onReorder(next.map((gift) => gift.id).toList());
+        } catch (e) {
+          if (!mounted) return;
+          setState(() => _pending = null);
+          messenger.showSnackBar(
+            SnackBar(content: Text('$e')),
+          );
+        }
+      },
+      itemBuilder: (context, index) {
+        final gift = gifts[index];
+        return Card(
+          key: ValueKey(gift.id),
+          margin: const EdgeInsets.only(bottom: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ListTile(
+                leading: ReorderableDragStartListener(
+                  index: index,
+                  child: const Icon(Icons.drag_handle),
+                ),
+                title: Row(
+                  children: [
+                    GroupBrandMark(
+                      groupName: widget.group.name,
+                      logoUrl: Organization.resolveLogoUrl(
+                        organizationLogoUrl: widget.orgLogo,
+                        fallback: gift.logoUrl,
+                      ),
+                      orgId: widget.orgId,
+                      size: 36,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(gift.title)),
+                  ],
+                ),
+                subtitle: Text(
+                  [
+                    gift.frequency,
+                    if (gift.specificTime != null &&
+                        gift.specificTime!.isNotEmpty)
+                      gift.specificTime!,
+                  ].join(' · '),
+                ),
+                onTap: () => widget.onOpen(gift),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => widget.onDelete(gift),
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Delete'),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => widget.onShare(gift),
+                      icon: const Icon(Icons.share_outlined),
+                      label: const Text('Share'),
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(gift.active ? 'Active' : 'Inactive'),
+                        Switch(
+                          value: gift.active,
+                          onChanged: (on) => widget.onActive(gift, on),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

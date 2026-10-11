@@ -143,6 +143,38 @@
         { "fieldPath": "orgId", "order": "ASCENDING" },
         { "fieldPath": "source", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "questionThemeEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organizationId", "order": "ASCENDING" },
+        { "fieldPath": "recordedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "questionThemeEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userHash", "order": "ASCENDING" },
+        { "fieldPath": "dayKey", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "saints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "saints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "published", "order": "ASCENDING" },
+        { "fieldPath": "sortDate", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

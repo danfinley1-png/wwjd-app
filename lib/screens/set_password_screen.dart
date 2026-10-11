@@ -64,7 +64,7 @@ class _SetPasswordScreenState extends ConsumerState<SetPasswordScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Set your password'),
+        title: const Text('Create a new password'),
         automaticallyImplyLeading: false,
       ),
       body: SafeArea(
@@ -77,13 +77,14 @@ class _SetPasswordScreenState extends ConsumerState<SetPasswordScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'Welcome to WWJD-DI',
+                    'Create a new password',
                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Your account was created by your organization. '
-                    'Please choose a secure personal password before continuing.',
+                    'Your WWJD-DI account was created by your organization. '
+                    'Choose a secure personal password before continuing. '
+                    'This screen cannot be skipped.',
                     style: TextStyle(color: Colors.grey.shade700, height: 1.45),
                   ),
                   const SizedBox(height: 24),

@@ -87,6 +87,8 @@ class GroupInviteService {
     required String groupName,
 
     String? organizationName,
+    String? emailSubject,
+    String? emailText,
 
   }) async {
 
@@ -159,7 +161,13 @@ class GroupInviteService {
 
     final batch = _firestore.batch();
 
-    batch.set(_groupInvites(orgId).doc(inviteId), invite.toMap());
+    final invitePayload = invite.toMap();
+    final subject = emailSubject?.trim() ?? '';
+    final body = emailText?.trim() ?? '';
+    if (subject.isNotEmpty) invitePayload['emailSubject'] = subject;
+    if (body.isNotEmpty) invitePayload['emailText'] = body;
+
+    batch.set(_groupInvites(orgId).doc(inviteId), invitePayload);
 
     batch.set(_userGroupInviteIndex(member.uid)!.doc(inviteId), {
 
@@ -221,7 +229,7 @@ class GroupInviteService {
         if (!disposed && !c.isClosed) c.add(invites);
       } catch (e, st) {
         debugPrint('GroupInviteService.watchPendingInvitesForUid: $e\n$st');
-        if (!disposed && !c.isClosed) c.addError(e, st);
+        if (!disposed && !c.isClosed) c.add(const []);
       }
     }
 
@@ -467,6 +475,15 @@ class GroupInviteService {
       SetOptions(merge: true),
 
     );
+
+    final inviteRef = _groupInvites(invite.organizationId).doc(invite.id);
+    final inviteSnap = await inviteRef.get();
+    if (inviteSnap.exists && inviteSnap.data()?['inviteEmailSentAt'] == null) {
+      await inviteRef.set(
+        {'emailNotifyRequestedAt': FieldValue.serverTimestamp()},
+        SetOptions(merge: true),
+      );
+    }
 
   }
 

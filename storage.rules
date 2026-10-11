@@ -2,19 +2,23 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    match /users/{userId}/profile.jpg {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null
-        && request.auth.uid == userId
-        && request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
-      allow delete: if request.auth != null && request.auth.uid == userId;
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
     }
 
-    // Organization logos — Cloud Function writes with Admin SDK; token URLs are used for display.
-    match /organizations/{orgId}/logo.jpg {
-      allow read: if request.auth != null;
-      allow write: if false;
+    function validSaintUpload() {
+      return request.resource.size < 80 * 1024 * 1024
+        && (
+          request.resource.contentType == 'video/mp4'
+          || request.resource.contentType == 'image/jpeg'
+        );
+    }
+
+    match /Saints/{saintId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && validSaintUpload();
+      allow delete: if isAdmin();
     }
   }
 }

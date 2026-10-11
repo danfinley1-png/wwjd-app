@@ -53,7 +53,7 @@ class AdminAccessService {
 
     for (final doc in membershipSnap.docs) {
       final role = adminRoleFromFirestore(doc.data()['role'] as String?);
-      if (role.canViewPastoralInsights) {
+      if (role.canManageGroups) {
         hasLeaderMembership = true;
         break;
       }
@@ -82,7 +82,7 @@ class AdminAccessService {
 
     for (final doc in snap.docs) {
       final invite = OrganizationInvite.fromMap(doc.id, doc.data());
-      if (invite.role.canViewPastoralInsights) return true;
+      if (invite.role.canManageGroups) return true;
     }
     return false;
   }

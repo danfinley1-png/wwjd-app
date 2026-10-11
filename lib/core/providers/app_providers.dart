@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-
-import '../../admin/config/admin_config.dart';
 import '../auth/auth_service.dart';
+import '../firestore_resilience.dart';
+import '../platform_admin_claim.dart';
 import '../repositories/history_repository.dart';
 import '../services/gift_service.dart';
 import '../services/gift_reminder_service.dart';
@@ -18,6 +17,10 @@ import '../../models/group_practice_instance.dart';
 import '../models/shareable_group.dart';
 import '../services/walk_together_service.dart';
 import '../services/walk_together_engagement_service.dart';
+import '../services/product_feedback_service.dart';
+import '../services/saints_service.dart';
+import '../repositories/saints_repository.dart';
+import '../../models/saint_video.dart';
 import '../services/user_profile_service.dart';
 import '../../models/walk_together_engagement.dart';
 import '../../models/chat_message.dart';
@@ -84,20 +87,36 @@ final profileGroupMembershipsProvider = StreamProvider<List<ShareableGroup>>((re
 
 final isSuperAdminUserProvider = StreamProvider<bool>((ref) {
   ref.watch(authStateProvider);
-  final user = ref.watch(authServiceProvider).currentUser;
-  if (user == null) return Stream.value(false);
-  if (AdminConfig.isFoundationAdmin(user.email)) {
-    return Stream.value(true);
-  }
-  return FirebaseFirestore.instance
-      .collection('platformAdmins')
-      .doc(user.uid)
-      .snapshots()
-      .map((snap) => snap.exists);
+  return PlatformAdminClaim.watchPlatformAdmin(FirebaseAuth.instance);
 });
 
 final userProfileServiceProvider =
     Provider<UserProfileService>((ref) => UserProfileService());
+
+final productFeedbackServiceProvider =
+    Provider<ProductFeedbackService>((ref) => ProductFeedbackService());
+
+final saintsServiceProvider =
+    Provider<SaintsService>((ref) => SaintsService());
+
+final saintsRepositoryProvider =
+    Provider<SaintsRepository>((ref) => SaintsRepository());
+
+final publishedSaintsProvider = StreamProvider<List<SaintEntry>>((ref) {
+  return firestoreStreamWithFallback(
+    ref.watch(saintsRepositoryProvider).watchPublished(),
+    const [],
+    debugLabel: 'publishedSaints',
+  );
+});
+
+final saintByIdProvider =
+    StreamProvider.family<SaintEntry?, String>((ref, saintId) {
+  return ref.watch(saintsRepositoryProvider).watchBySlug(saintId);
+});
+
+/// Prefills Seeking God's Wisdom after “Ask WWJD” on a saint screen.
+final pendingHomeChatQuestionProvider = StateProvider<String?>((ref) => null);
 
 final authStateProvider = StreamProvider<User?>((ref) {
   return ref.watch(authServiceProvider).authStateChanges;
@@ -114,7 +133,11 @@ final walkTogetherServiceProvider =
 
 final walkTogetherJourneysProvider =
     StreamProvider<List<WalkTogetherJourney>>((ref) {
-  return ref.watch(walkTogetherServiceProvider).getJourneysStream();
+  return firestoreStreamWithFallback(
+    ref.watch(walkTogetherServiceProvider).getJourneysStream(),
+    const [],
+    debugLabel: 'walkTogetherJourneys',
+  );
 });
 
 final walkTogetherEngagementServiceProvider =

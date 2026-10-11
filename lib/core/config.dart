@@ -1,44 +1,78 @@
 ﻿/// Application configuration. Secrets are loaded from the environment — never hardcoded.
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 
 class AppConfig {
   static const String _xaiApiKeyEnv = 'XAI_API_KEY';
 
-  /// xAI API key from `--dart-define=XAI_API_KEY=...` or `--dart-define-from-file=.env`.
-  /// Used for local/dev native builds only — production web uses the `/api/chat` proxy.
+  /// Optional xAI key — **debug localhost web only** (never release / store builds).
   static String get xaiApiKey =>
       const String.fromEnvironment(_xaiApiKeyEnv, defaultValue: '');
 
   static bool get hasXaiApiKey => xaiApiKey.isNotEmpty;
 
-  /// True when the client may attach the xAI bearer token (local web dev / native).
-  static bool get useClientSideXaiKey {
-    if (!kIsWeb) return true;
+  static bool get _isLocalhostWeb {
+    if (!kIsWeb) return false;
     final host = Uri.base.host;
     return host == 'localhost' || host == '127.0.0.1';
   }
 
-  /// Chat completions endpoint. Web production uses same-origin proxy (no CORS).
+  /// Direct xAI from the browser — debug localhost **with** `--dart-define-from-file=.env` only.
+  static bool get useClientSideXaiKey =>
+      kDebugMode && _isLocalhostWeb && hasXaiApiKey;
+
+  static const String chatCompletionsFunctionUrl =
+      'https://us-central1-wwjd-di-e36ce.cloudfunctions.net/chatCompletions';
+
+  /// Authenticated proxy (`/api/chat` or Cloud Function URL). Never ships xAI key.
   static String get chatCompletionsUrl {
-    if (kIsWeb && !useClientSideXaiKey) {
+    if (useClientSideXaiKey) {
+      return 'https://api.x.ai/v1/chat/completions';
+    }
+    // `flutter run` on localhost has no Hosting `/api/chat` rewrite — call the function URL.
+    if (kIsWeb && !(kDebugMode && _isLocalhostWeb)) {
       return '${Uri.base.origin}/api/chat';
     }
-    return 'https://api.x.ai/v1/chat/completions';
+    return chatCompletionsFunctionUrl;
   }
 
   static const String appName = 'WWJD - DI';
   /// Full product name shown in the mobile header (no spaces around hyphen).
   static const String mobileDisplayName = 'WWJD-DI';
+
+  /// Bump when Saints routing/posters/player change — visible under Saints app bar.
+  static const String saintsUiBuildId = 'saints-2026-03-29-v8';
+
+  /// Legacy export copy (calendar ICS). Not shown in the app header.
   static const String tagline =
       'Sharing the Divine Intelligence of Scripture and the Revelation of the Catholic Church';
 
-  /// Shown in the chat when Seeking God's Wisdom opens with no prior conversation.
-  static const String seekingGodsWisdomWelcome = '''
+  static const String purposeLineOne = 'A Catholic Divine Intelligence guide.';
+  static const String purposeLineTwo = 'Ask WWJD.';
+
+  static const List<String> homeDecisionChips = [
+    'I have a hard conversation this week.',
+    "I'm anxious and don't know what to pray.",
+    'How do I treat someone I resent?',
+    'Why is it important to go to Mass?',
+  ];
+
+  static const String chatInputPlaceholder =
+      "What's on your heart?";
+
+  /// Ask WWJD limits — enforced server-side in `chatCompletions` (keep in sync with functions/chat_quota.js).
+  static const int guestQuestionLimit = 3;
+  static const int registeredDailyQuestionLimit = 25;
+
+  /// Home empty state (above decision chips) — not injected into chat history.
+  static const String homeWelcomeMarkdown = '''
 **Welcome to WWJD-DI**
 
 Seeking God's Wisdom through the guidance of Divine Intelligence — Scripture and the living revelation of the Catholic Church.
 
-Bring any question, concern, or decision. We walk together.''';
+Bring any questions, concerns or decisions. We walk together.''';
+
+  /// Legacy alias for tests or static prompts.
+  static const String seekingGodsWisdomWelcome = homeWelcomeMarkdown;
 
   /// First-open dialog for new / guest users (Sign Up or Continue as Guest).
   static const String guestWelcomeTitle = 'Welcome to WWJD-DI';
@@ -89,6 +123,47 @@ Bring any question, concern, or decision. We walk together.''';
   static const String provisionInstitutionalUsersFunctionUrl =
       'https://us-central1-wwjd-di-e36ce.cloudfunctions.net/provisionInstitutionalUsers';
 
+  /// Overall Admin user directory (hosting rewrite → getUserDirectory).
+  static String get userDirectoryApiUrl {
+    if (kIsWeb && !useClientSideXaiKey) {
+      return '${Uri.base.origin}/api/getUserDirectory';
+    }
+    return userDirectoryFunctionUrl;
+  }
+
+  static const String userDirectoryFunctionUrl =
+      'https://us-central1-wwjd-di-e36ce.cloudfunctions.net/getUserDirectory';
+
+  static String get resendDirectoryInviteApiUrl {
+    if (kIsWeb && !useClientSideXaiKey) {
+      return '${Uri.base.origin}/api/resendDirectoryInvite';
+    }
+    return resendDirectoryInviteFunctionUrl;
+  }
+
+  static const String resendDirectoryInviteFunctionUrl =
+      'https://us-central1-wwjd-di-e36ce.cloudfunctions.net/resendDirectoryInvite';
+
+  static String get recordQuestionThemeApiUrl {
+    if (kIsWeb && !useClientSideXaiKey) {
+      return '${Uri.base.origin}/api/recordQuestionTheme';
+    }
+    return recordQuestionThemeFunctionUrl;
+  }
+
+  static const String recordQuestionThemeFunctionUrl =
+      'https://us-central1-wwjd-di-e36ce.cloudfunctions.net/recordQuestionTheme';
+
+  static String get questionThemeReportApiUrl {
+    if (kIsWeb && !useClientSideXaiKey) {
+      return '${Uri.base.origin}/api/getQuestionThemeReport';
+    }
+    return questionThemeReportFunctionUrl;
+  }
+
+  static const String questionThemeReportFunctionUrl =
+      'https://us-central1-wwjd-di-e36ce.cloudfunctions.net/getQuestionThemeReport';
+
   /// Foundation admin self-registration (hosting rewrite → ensurePlatformAdmin).
   static String get ensurePlatformAdminApiUrl {
     if (kIsWeb && !useClientSideXaiKey) {
@@ -120,6 +195,29 @@ Bring any question, concern, or decision. We walk together.''';
 
   static const String orgLogoFunctionUrl =
       'https://us-central1-wwjd-di-e36ce.cloudfunctions.net/uploadOrgLogo';
+
+  /// Saint clip upload (web/desktop proxy). Hosting rewrite → uploadSaintVideo.
+  static String get saintVideoApiUrl {
+    if (kIsWeb && !useClientSideXaiKey) {
+      return '${Uri.base.origin}/api/saint-video';
+    }
+    return saintVideoFunctionUrl;
+  }
+
+  static const String saintVideoFunctionUrl =
+      'https://us-central1-wwjd-di-e36ce.cloudfunctions.net/uploadSaintVideo';
+
+  /// GET stream for saint feast / legacy clips (web playback; Range requests).
+  static String get streamSaintVideoApiUrl {
+    // Localhost dev server has no `/api/*` rewrites — use the function URL (see [chatCompletionsUrl]).
+    if (kIsWeb && !(kDebugMode && _isLocalhostWeb)) {
+      return '${Uri.base.origin}/api/stream-saint-video';
+    }
+    return streamSaintVideoFunctionUrl;
+  }
+
+  static const String streamSaintVideoFunctionUrl =
+      'https://us-central1-wwjd-di-e36ce.cloudfunctions.net/streamSaintVideo';
 
   /// @deprecated Use [profilePhotoApiUrl] for uploads and fetches.
   static const String profilePhotoUploadUrl =

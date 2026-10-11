@@ -1,0 +1,13 @@
+# Example PowerShell session — paste REAL download URLs from Firebase Console (Storage).
+# Do not commit this file with live tokens.
+
+$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\path\to\adminsdk.json"
+
+# Holy Archangels only (recommended fix for bad placeholders):
+$env:ARCHANGELS_VIDEO_LANDSCAPE_URL = "gs://wwjd-di-e36ce.firebasestorage.app/Saints/2026-09-29-Archangels/landscape.mp4"
+$env:ARCHANGELS_VIDEO_PORTRAIT_URL = "gs://wwjd-di-e36ce.firebasestorage.app/Saints/2026-09-29-Archangels/portrait.mp4"
+$env:ARCHANGELS_POSTER_PORTRAIT_URL = "gs://wwjd-di-e36ce.firebasestorage.app/Saints/2026-09-29-Archangels/poster.jpg"
+
+# Then:
+#   cd C:\Users\danfi\wwjd_app
+#   .\scripts\seed-holy-archangels.ps1

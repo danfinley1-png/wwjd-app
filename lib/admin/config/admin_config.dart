@@ -23,8 +23,9 @@ class AdminConfig {
       'to organization leaders.';
 
   static const String insightsScopeNotice =
-      'Insights show aggregated theme counts for your organization\'s groups '
-      'with k-anonymity protection. No names, accounts, or message content appear.';
+      'This report shows aggregated theme counts for your organization '
+      'with k-anonymity protection (8 distinct people per cell). '
+      'No names, accounts, or question text appear.';
 
   static const List<String> suggestedAgeBands = [
     'High School',

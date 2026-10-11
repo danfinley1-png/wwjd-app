@@ -27,7 +27,7 @@ void main() {
         for (var i = 0; i < 5; i++)
           AnonymizedConversationRecord(
             id: 'tiny_$i',
-            theme: PastoralThemeCategory.anxietyTrustInGod,
+            theme: PastoralThemeCategory.prayer,
             ministryGroupId: 'tiny_group',
             ageBand: 'High School',
             recordedAt: now.subtract(Duration(days: i)),
@@ -54,7 +54,7 @@ void main() {
         5,
         (i) => AnonymizedConversationRecord(
           id: 'x_$i',
-          theme: PastoralThemeCategory.moralQuestions,
+          theme: PastoralThemeCategory.moralDecision,
           recordedAt: now.subtract(Duration(days: i)),
           isDemo: true,
         ),

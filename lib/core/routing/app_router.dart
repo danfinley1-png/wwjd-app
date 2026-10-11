@@ -9,12 +9,16 @@ import '../../screens/gift_activity_screen.dart';
 import '../../screens/pending_group_invites_screen.dart';
 import '../../screens/prayers_screen.dart';
 import '../../screens/prayer_detail_screen.dart';
+import '../../models/saint_video.dart';
+import '../../screens/saints_calendar_page.dart';
+import '../../screens/saint_watch_screen.dart';
 import '../../spiritual_nourishment/local_worship/screens/local_worship_screen.dart';
 import '../../screens/school_org_calendar_screen.dart';
 import '../../admin/screens/admin_sign_in_screen.dart';
 import '../gift_activity_link.dart';
 import '../prayer_link.dart';
 import 'root_navigator.dart';
+import 'shell_navigation.dart';
 
 GoRouter createAppRouter(Ref ref) {
   final homeRefreshKey = ref.watch(homeRefreshKeyProvider);
@@ -85,6 +89,16 @@ GoRouter createAppRouter(Ref ref) {
         builder: (context, state) => const PendingGroupInvitesScreen(),
       ),
       GoRoute(
+        path: SaintEntry.listPath,
+        builder: (context, state) => const SaintsCalendarPage(),
+      ),
+      GoRoute(
+        path: '${SaintEntry.pathPrefix}/:slug',
+        builder: (context, state) => SaintWatchScreen(
+          routeSlug: state.pathParameters['slug']!,
+        ),
+      ),
+      GoRoute(
         path: '/admin/sign-in',
         builder: (context, state) => const AdminSignInScreen(),
       ),
@@ -102,7 +116,7 @@ GoRouter createAppRouter(Ref ref) {
             Text(state.error?.toString() ?? 'Unknown route'),
             const SizedBox(height: 16),
             FilledButton(
-              onPressed: () => context.go('/'),
+              onPressed: () => goToAppHome(context),
               child: const Text('Go Home'),
             ),
           ],

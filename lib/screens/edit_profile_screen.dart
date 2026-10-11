@@ -11,6 +11,7 @@ import '../widgets/profile_photo_editor.dart';
 import '../widgets/read_aloud_voice_setting.dart';
 import '../widgets/profile_messages_section.dart';
 import 'change_password_screen.dart';
+import 'send_feedback_screen.dart';
 
 /// Full-screen profile editor reachable from the app menu.
 class EditProfileScreen extends ConsumerWidget {
@@ -145,6 +146,24 @@ class EditProfileScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
           const ReadAloudVoiceSetting(),
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.feedback_outlined),
+              title: const Text('Send feedback'),
+              subtitle: const Text(
+                'Tell the WWJD-DI team about the app — not a spiritual journal.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const SendFeedbackScreen(),
+                  ),
+                );
+              },
+            ),
+          ),
           const SizedBox(height: 28),
           const Divider(),
           const SizedBox(height: 20),

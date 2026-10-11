@@ -11,6 +11,7 @@ enum UsageSection {
   spiritualNourishment('spiritual_nourishment', 'Spiritual Nourishment'),
   pastoralInsights('pastoral_insights', 'Pastoral Insights'),
   admin('admin', 'Administration'),
+  saints('saints', 'Saints'),
   other('other', 'Other');
 
   const UsageSection(this.id, this.label);

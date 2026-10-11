@@ -1,26 +1,30 @@
-/// Configuration for Phase 1 Pastoral Insights (anonymized, k-anonymity).
+/// Configuration for anonymized pastoral / question-theme insights.
 class PastoralInsightsConfig {
   PastoralInsightsConfig._();
 
-  /// Minimum distinct conversations before themes or pools are shown.
-  static const int kAnonymityThreshold = 10;
+  /// Minimum distinct users before a cell may show a number.
+  static const int kAnonymityThreshold = 8;
 
-  /// Phase 1 uses synthetic demo data only — no live conversation ingestion.
-  static const bool useDemoDataOnly = true;
+  /// Live events are stored on `questionThemeEvents` via `recordQuestionTheme`.
+  /// Synthetic preview is opt-in and must stay labeled.
+  static const bool useDemoDataOnly = false;
 
-  /// When true, insights screen is visible in the sidebar for all users (legacy demo).
-  /// Foundation admin layer routes insights through Administration for authorized leaders.
+  /// When true, insights screen is visible in the member sidebar.
+  /// Must stay false — this report is admin-only.
   static const bool insightsMenuEnabled = false;
 
   static const String privacyNotice =
       'Individual conversations, My History, and My Reflections remain completely '
-      'private. Insights show only aggregated, anonymized theme counts. No names, '
-      'accounts, or message content are ever displayed here.';
+      'private. This report shows only aggregated theme counts. No names, '
+      'accounts, question text, or message content are stored or displayed here.';
 
   static const String demoDataNotice =
-      'You are viewing synthetic demonstration data for Catholic youth ministry. '
-      'This sample helps leaders preview the insights experience before enough '
-      'real aggregated volume exists.';
+      'You are viewing a labeled synthetic demonstration dataset. '
+      'These counts are not live Seeking God\'s Wisdom or Walk Together questions.';
+
+  static const String suppressionNotice =
+      'A count is shown only when at least 8 distinct people asked in that cell. '
+      'Smaller group-and-theme cells roll up to the organization or to all themes.';
 
   static const Map<String, String> demoMinistryGroups = {
     'st_marys_youth': "St. Mary's Youth Group",

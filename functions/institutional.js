@@ -1,12 +1,10 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const {
-  isFoundationAdminEmail,
-  generateTemporaryPassword,
-} = require("./admin_config");
+const { isFoundationAdminEmail } = require("./admin_config");
 const { resendApiKey } = require("./email_config");
-const { sendProvisionWelcomeEmail } = require("./institutional_emails");
+const { handleBulkRoster } = require("./bulk_roster");
+
 async function verifyIdToken(req) {
   const authHeader = req.headers.authorization || "";
   const idToken = authHeader.startsWith("Bearer ")
@@ -48,6 +46,27 @@ async function isSuperAdmin(db, decoded) {
   return snap.exists;
 }
 
+async function isOrgAdminRole(db, uid, orgId) {
+  const orgSnap = await db.collection("organizations").doc(orgId).get();
+  if (!orgSnap.exists) return false;
+  if (orgSnap.data().createdByUid === uid) return true;
+
+  const memberSnap = await db
+    .collection("organizations")
+    .doc(orgId)
+    .collection("members")
+    .doc(uid)
+    .get();
+  if (!memberSnap.exists) return false;
+  return memberSnap.data().role === "orgAdmin";
+}
+
+async function canRegisterAccounts(db, decoded, orgId) {
+  if (isFoundationAdminEmail(decoded.email)) return true;
+  if (await isSuperAdmin(db, decoded)) return true;
+  return isOrgAdminRole(db, decoded.uid, orgId);
+}
+
 async function canProvisionUsers(db, decoded, orgId) {
   if (isFoundationAdminEmail(decoded.email)) return true;
   if (await isSuperAdmin(db, decoded)) return true;
@@ -85,7 +104,9 @@ function registerInstitutionalFunctions(exports) {
           { merge: true }
         );
 
-        res.status(200).json({ ok: true });
+        await getAuth().setCustomUserClaims(decoded.uid, { admin: true });
+
+        res.status(200).json({ ok: true, adminClaim: true });
       } catch (err) {
         res.status(err.status || 500).json({ error: err.message || "Failed" });
       }
@@ -93,8 +114,14 @@ function registerInstitutionalFunctions(exports) {
   );
 
   exports.provisionInstitutionalUsers = onRequest(
-    { cors: true, invoker: "public", timeoutSeconds: 120, secrets: [resendApiKey] },
-    async (req, res) => {      if (req.method === "OPTIONS") {
+    {
+      cors: true,
+      invoker: "public",
+      timeoutSeconds: 180,
+      secrets: [resendApiKey],
+    },
+    async (req, res) => {
+      if (req.method === "OPTIONS") {
         res.status(204).send("");
         return;
       }
@@ -105,9 +132,20 @@ function registerInstitutionalFunctions(exports) {
 
       try {
         const decoded = await verifyIdToken(req);
-        const orgId = req.body?.orgId;
+        const orgIdRaw = req.body?.orgId;
+        const orgId = typeof orgIdRaw === "string" ? orgIdRaw.trim() : "";
+        const target = String(req.body?.target || "").trim().toLowerCase();
+        const isPlatform =
+          target === "platform" ||
+          target === "wwjd-di" ||
+          (!orgId && target !== "organization");
         const users = req.body?.users;
-        if (!orgId || !Array.isArray(users) || users.length === 0) {
+        const mode = req.body?.mode;
+        if (!Array.isArray(users) || users.length === 0) {
+          res.status(400).json({ error: "users[] required" });
+          return;
+        }
+        if (!isPlatform && !orgId) {
           res.status(400).json({ error: "orgId and users[] required" });
           return;
         }
@@ -117,87 +155,55 @@ function registerInstitutionalFunctions(exports) {
         }
 
         const db = getFirestore();
-        if (!(await canProvisionUsers(db, decoded, orgId))) {
-          res.status(403).json({ error: "Missing sufficient permissions" });
-          return;
-        }
-
-        const orgSnap = await db.collection("organizations").doc(orgId).get();
-        if (!orgSnap.exists) {
-          res.status(404).json({ error: "Organization not found" });
-          return;
-        }
-
-        const organizationName = (orgSnap.data()?.name || "").trim() || null;
-
-        const created = [];
-        const skipped = [];
-        const auth = getAuth();
-
-        for (const entry of users) {
-          const email = (entry?.email || "").trim().toLowerCase();
-          const displayName = (entry?.displayName || "").trim();
-          if (!email || !email.includes("@")) {
-            skipped.push(email || "(invalid)");
-            continue;
+        let canInvite;
+        let canRegister;
+        if (isPlatform) {
+          const superAdmin = await isSuperAdmin(db, decoded);
+          if (!superAdmin) {
+            res.status(403).json({ error: "Overall Admin access required" });
+            return;
           }
-
-          try {
-            let userRecord;
-            try {
-              userRecord = await auth.getUserByEmail(email);
-              skipped.push(email);
-              continue;
-            } catch (lookupErr) {
-              if (lookupErr.code !== "auth/user-not-found") throw lookupErr;
-            }
-
-            const tempPassword = generateTemporaryPassword();
-            userRecord = await auth.createUser({
-              email,
-              password: tempPassword,
-              displayName: displayName || undefined,
-              emailVerified: false,
-            });
-
-            await db.collection("users").doc(userRecord.uid).set(
-              {
-                email,
-                displayName: displayName || null,
-                mustChangePassword: true,
-                accountStatus: "pending_password",
-                hasSeenInstitutionalWelcome: false,
-                provisionedByOrgId: orgId,
-                shareAnonymouslyByDefault: true,
-                createdAt: FieldValue.serverTimestamp(),
-                updatedAt: FieldValue.serverTimestamp(),
-              },
-              { merge: true }
-            );
-
-            const welcomeEmail = await sendProvisionWelcomeEmail({
-              email,
-              displayName: displayName || null,
-              temporaryPassword: tempPassword,
-              organizationName,
-              orgId,
-            });
-
-            created.push({
-              email,
-              displayName: displayName || null,
-              temporaryPassword: tempPassword,
-              welcomeEmailSent: welcomeEmail.ok,
-              ...(welcomeEmail.error
-                ? { welcomeEmailError: welcomeEmail.error }
-                : {}),
-            });          } catch (userErr) {
-            console.error("provision user error", email, userErr);
-            skipped.push(email);
+          canInvite = true;
+          canRegister = true;
+        } else {
+          canInvite = await canProvisionUsers(db, decoded, orgId);
+          canRegister = await canRegisterAccounts(db, decoded, orgId);
+          if (!canInvite && !canRegister) {
+            res.status(403).json({ error: "Missing sufficient permissions" });
+            return;
           }
         }
 
-        res.status(200).json({ created, skipped });
+        const groupIds = isPlatform
+          ? []
+          : Array.isArray(req.body?.groupIds)
+            ? req.body.groupIds.map((id) => String(id)).filter(Boolean)
+            : [];
+        const emailSubject =
+          typeof req.body?.emailSubject === "string"
+            ? req.body.emailSubject
+            : "";
+        const emailText =
+          typeof req.body?.emailText === "string" ? req.body.emailText : "";
+        const attachOrgInvite = isPlatform
+          ? false
+          : req.body?.attachOrgInvite !== false;
+
+        const result = await handleBulkRoster({
+          decoded,
+          orgId: isPlatform ? null : orgId,
+          mode,
+          users,
+          groupIds,
+          attachOrgInvite,
+          emailSubject,
+          emailText,
+          canInvite,
+          canRegister,
+          isPlatform,
+        });
+
+        res.status(200).json(result);
       } catch (err) {
         res.status(err.status || 500).json({ error: err.message || "Failed" });
       }
